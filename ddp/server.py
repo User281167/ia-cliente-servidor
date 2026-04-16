@@ -24,12 +24,13 @@ import selectors
 import socket
 import threading
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from .logger import log
-from .pickle_utils import pickle_code, recv_msg, send_msg, send_safe
+from .message import MSG_READY, MSG_RESULT, DDPMessage, recv_ddp
+from .pickle_utils import pickle_code, send_msg, send_safe
 
 
 class DDPServer(ABC):
@@ -144,7 +145,7 @@ class DDPServer(ABC):
         with self._workers_lock:
             for wid, sock in list(self._workers.items()):
                 try:
-                    send_msg(sock, {"type": "done"})
+                    send_msg(sock, DDPMessage.done())
                 except Exception:
                     pass
                 try:
@@ -202,9 +203,11 @@ class DDPServer(ABC):
     def _handshake_worker(self, conn: socket.socket, addr) -> None:
         """Asigna worker_id y espera 'ready'"""
         try:
-            msg = recv_msg(conn)
+            msg = recv_ddp(conn)
 
-            if msg.get("type") != "ready":
+            try:
+                DDPMessage.expect(msg, MSG_READY)
+            except ValueError:
                 conn.close()
                 return
 
@@ -229,8 +232,7 @@ class DDPServer(ABC):
 
             # Confirmar asignación
             assign = self._assignments.get(wid, {})
-            send_msg(conn, {"type": "assign", "worker_id": wid, **assign})
-
+            send_msg(conn, DDPMessage.assign(wid, **assign))
         except Exception as e:
             log.warning(f"Error en handshake con {addr}: {e}")
             conn.close()
@@ -291,15 +293,18 @@ class DDPServer(ABC):
         if dead:
             self._remove_dead(dead)
 
-    def _broadcast_weights(self, W0: list, b0: list) -> None:
-        """Envía W0, b0 a todos los workers registrados con pool."""
-        msg = {"type": "weights", "payload": (W0, b0)}
+    def _broadcast_weights(self, state):
+        """
+        Envía W0, b0 a todos los workers registrados con pool.
 
-        self._broadcast_pool(msg)
+        model: modelo de pytorch con state_dict() que contiene los pesos a enviar.
+        """
 
-    def _broadcast_step(self) -> None:
+        self._broadcast_pool(DDPMessage.weights(state))
+
+    def _broadcast_step(self, epoch: int) -> None:
         """Indica a todos los workers que ejecuten su paso (sin pool, secuencial)."""
-        self._broadcast_fast({"type": "step"})
+        self._broadcast_fast(DDPMessage.step(epoch))
 
     def _collect_results(self):
         """
@@ -341,13 +346,10 @@ class DDPServer(ABC):
                 sel.unregister(sock)
 
                 try:
-                    msg = recv_msg(sock)
-
                     # solo esperamos mensajes de tipo "result"
-                    if msg["type"] != "result":
-                        raise ValueError(msg["type"])
-
-                    results.append(msg["payload"])
+                    msg = recv_ddp(sock)
+                    DDPMessage.expect(msg, MSG_RESULT)
+                    results.append(msg)
                 except Exception as e:
                     log.warning(f"Worker {wid} falló: {e}")
                     dead.append(wid)
@@ -356,7 +358,6 @@ class DDPServer(ABC):
             dead.append(key.data)
 
         self._remove_dead(dead)
-
         return results
 
     def _remove_dead(self, wids: list) -> None:
@@ -377,10 +378,3 @@ class DDPServer(ABC):
             if not self._workers:
                 log.warning("No quedan workers activos")
                 self._ready_event.clear()
-
-    # Abstracto
-
-    @abstractmethod
-    def step(self):
-        """Ejecuta una época completa"""
-        ...

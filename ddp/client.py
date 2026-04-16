@@ -2,11 +2,27 @@ from __future__ import annotations
 
 import socket
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Optional
 
 from .logger import log
+from .message import MSG_ASSIGN, MSG_DONE, DDPMessage, recv_ddp
 from .pickle_utils import recv_msg, send_msg
+
+
+class HandlerRegistry:
+    def __init__(self):
+        self._handlers = {}
+
+    def on(self, msg_type):
+        def decorator(fn):
+            self._handlers[msg_type] = fn
+            return fn
+
+        return decorator
+
+    def get(self, msg_type):
+        return self._handlers.get(msg_type)
 
 
 class DDPClient(ABC):
@@ -33,6 +49,8 @@ class DDPClient(ABC):
         self._assignment: dict = {}
         self._connected = False
 
+        self._handlers = HandlerRegistry()
+
     def connect(self) -> None:
         """Conecta al servidor y recibe la asignación inicial (handshake)."""
         for attempt in range(1, self.RECONNECT_ATTEMPTS + 1):
@@ -48,25 +66,15 @@ class DDPClient(ABC):
                 self._sock = sock
 
                 # Enviar ready (con worker_id si es reconexión)
-                msg: dict = {"type": "ready"}
-
-                if self._worker_id is not None:
-                    msg["worker_id"] = self._worker_id
-
+                msg: dict = DDPMessage.ready(self._worker_id)
                 send_msg(sock, msg)
 
                 # Recibir asignación
-                assign = recv_msg(sock)
+                assign = recv_ddp(sock)
+                DDPMessage.expect(assign, MSG_ASSIGN)
 
-                if assign.get("type") != "assign":
-                    raise ValueError(
-                        f"Se esperaba 'assign', se recibio {assign.get('type')}"
-                    )
-
-                self._worker_id = assign["worker_id"]
-                self._assignment = {
-                    k: v for k, v in assign.items() if k not in ("type", "worker_id")
-                }
+                self._worker_id = assign["meta"]["worker_id"]
+                self._assignment = assign["payload"]
                 self._connected = True
 
                 log.info(
@@ -110,7 +118,11 @@ class DDPClient(ABC):
         log.info("Intentando reconexión…")
         self.connect()
 
-    def _loop(self, handlers: dict) -> None:
+    # eventos
+    def on(self, msg_type):
+        return self._handlers.on(msg_type)
+
+    def _loop(self) -> None:
         """
         Loop principal de mensajes.
         `handlers` es un dict  tipo -> callable(msg) → None
@@ -118,38 +130,24 @@ class DDPClient(ABC):
         """
         while True:
             try:
-                msg = recv_msg(self._sock)
-                mtype = msg.get("type")
+                msg = DDPMessage.parse(recv_msg(self._sock))
+                mtype = msg["type"]
 
-                if mtype == "done":
-                    log.info("Servidor indicó fin — cerrando")
+                if mtype == MSG_DONE:
+                    log.info("Servidor indicó fin")
                     break
 
-                if mtype == "assign":
-                    # re-asignación durante reconexión
-                    self._assignment = {
-                        k: v for k, v in msg.items() if k not in ("type", "worker_id")
-                    }
-                    log.info(f"Re-asignación recibida: {self._assignment}")
-                    continue
-
-                handler = handlers.get(mtype)
+                handler = self._handlers.get(mtype)
 
                 if handler:
                     handler(msg)
                 else:
-                    log.warning(f"Mensaje desconocido ignorado: {mtype}")
+                    log.warning(f"Mensaje desconocido: {mtype}")
 
             except (ConnectionError, OSError) as e:
                 log.warning(f"Conexión perdida: {e}")
+                self._reconnect()
 
-                try:
-                    self._reconnect()
-                except ConnectionError:
-                    log.error("No se pudo reconectar — terminando cliente")
-                    break
-
-    @abstractmethod
-    def run() -> None:
-        """Blocking loop — escucha mensajes y ejecuta funciones."""
-        ...
+    def run(self):
+        self.connect()
+        self._loop()
