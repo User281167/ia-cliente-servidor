@@ -56,6 +56,8 @@ class CIFAR10Server(DDPServer):
         )
 
     def results(self, save_path: str | None):
+        """Guarda las métricas en un archivo Excel y genera gráfico de resultados."""
+
         if save_path:
             os.makedirs(save_path, exist_ok=True)
 
@@ -103,6 +105,8 @@ class CIFAR10Server(DDPServer):
                 f.write(f"Final accuracy: {acc}")
 
     def evaluate(self):
+        """Evalua el modelo en el test set y devuelve loss y accuracy."""
+        self.model.eval()
         total_loss = 0
         correct = 0
         total = 0
@@ -144,6 +148,10 @@ class CIFAR10Server(DDPServer):
         return correct / total, confusion_matrix.compute().cpu()
 
     def _send_assign(self, n_workers: int, epoch: int):
+        """
+        Envía el mensaje de asignación a todos los workers.
+        Cada worker recibe un mensaje con su ID, rank, world_size y epoch antes de comenzar el entrenamiento.
+        """
         with self._workers_lock:
             items = list(self._workers.items())
 
@@ -163,6 +171,11 @@ class CIFAR10Server(DDPServer):
                 log.warning(f"Worker {wid} fallo assign: {e}")
 
     def step(self):
+        """
+        Ejecuta un paso de entrenamiento distribuido.
+        Espera a que los workers estén listos, envía los pesos actuales,
+        luego envía el mensaje de step y recopila los resultados.
+        """
         t0 = time.perf_counter()
         n_workers = self._wait_workers()
 
@@ -181,6 +194,7 @@ class CIFAR10Server(DDPServer):
         results = self._collect_results()
 
         if not results:
+            log.warning("No se recibieron resultados, saltando época")
             return
 
         accum_grads: dict[str, torch.Tensor] = {}
@@ -231,7 +245,7 @@ class CIFAR10Server(DDPServer):
         ]
 
         log.info(
-            f"Epoch {self.current_epoch}/{self.epochs} - loss: {loss:.4f} - accuracy: {accuracy:.4f} - eval_loss: {eval_loss:.4f} - eval_accuracy: {eval_accuracy:.4f} - gnorm: {gnorm:.4f} - elapsed: {format_elapse(elapsed)}"
+            f"Epoch {self.current_epoch + 1}/{self.epochs} - loss: {loss:.4f} - accuracy: {accuracy:.4f} - eval_loss: {eval_loss:.4f} - eval_accuracy: {eval_accuracy:.4f} - gnorm: {gnorm:.4f} - elapsed: {format_elapse(elapsed)}"
         )
 
         self.current_epoch += 1

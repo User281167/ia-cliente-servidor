@@ -143,7 +143,8 @@ class DDPClient(ABC):
                     handler(msg)
                 else:
                     log.warning(f"Mensaje desconocido: {mtype}")
-
+            except ValueError as e:
+                log.warning(f"Mensaje inválido: {e}")
             except (ConnectionError, OSError) as e:
                 log.warning(f"Conexión perdida: {e}")
                 self._reconnect()

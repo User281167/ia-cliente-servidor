@@ -50,6 +50,7 @@ class CIFAR10Worker(DDPClient):
         )
 
     def get_batch(self, epoch):
+        """Obtiene un lote de datos para la época dada."""
         N = len(self.dataset)
 
         rng = np.random.default_rng(seed=epoch)
@@ -62,6 +63,8 @@ class CIFAR10Worker(DDPClient):
         return shard
 
     def _register_handlers(self):
+        """Registra los manejadores de mensajes."""
+
         @self.on("assign")
         def on_assign(msg):
             payload = msg["payload"]
