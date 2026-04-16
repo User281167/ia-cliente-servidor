@@ -6,14 +6,28 @@ click==8.3.2
     # via black
 colorama==0.4.6
     # via click
+contourpy==1.3.3
+    # via matplotlib
+cycler==0.12.1
+    # via matplotlib
+et-xmlfile==2.0.0
+    # via openpyxl
 filelock==3.28.0
     # via torch
+fonttools==4.62.1
+    # via matplotlib
 fsspec==2026.3.0
     # via torch
 jinja2==3.1.6
     # via torch
+kiwisolver==1.5.0
+    # via matplotlib
+lightning-utilities==0.15.3
+    # via torchmetrics
 markupsafe==3.0.3
     # via jinja2
+matplotlib==3.10.8
+    # via server-param (pyproject.toml)
 mpmath==1.3.0
     # via sympy
 mypy-extensions==1.1.0
@@ -21,26 +35,56 @@ mypy-extensions==1.1.0
 networkx==3.6.1
     # via torch
 numpy==2.4.4
-    # via torchvision
+    # via
+    #   contourpy
+    #   matplotlib
+    #   pandas
+    #   torchmetrics
+    #   torchvision
+openpyxl==3.1.5
+    # via server-param (pyproject.toml)
 packaging==26.1
-    # via black
+    # via
+    #   black
+    #   lightning-utilities
+    #   matplotlib
+    #   torchmetrics
+pandas==3.0.2
+    # via server-param (pyproject.toml)
 pathspec==1.0.4
     # via black
 pillow==12.2.0
-    # via torchvision
+    # via
+    #   matplotlib
+    #   torchvision
 platformdirs==4.9.6
     # via black
+pyparsing==3.3.2
+    # via matplotlib
+python-dateutil==2.9.0.post0
+    # via
+    #   matplotlib
+    #   pandas
 pytokens==0.4.1
     # via black
 setuptools==81.0.0
     # via torch
+six==1.17.0
+    # via python-dateutil
 sympy==1.14.0
     # via torch
 torch==2.11.0
     # via
     #   server-param (pyproject.toml)
+    #   torchmetrics
     #   torchvision
+torchmetrics==1.9.0
+    # via server-param (pyproject.toml)
 torchvision==0.26.0
     # via server-param (pyproject.toml)
 typing-extensions==4.15.0
-    # via torch
+    # via
+    #   lightning-utilities
+    #   torch
+tzdata==2026.1
+    # via pandas

@@ -14,6 +14,7 @@ def run_server(
     min_workers: int = 1,
     host: str = "0.0.0.0",
     port: int = 9090,
+    save_path: str | None = None,
 ):
     server = CIFAR10Server(
         gray=gray,
@@ -31,12 +32,17 @@ def run_server(
         print(f"Error al iniciar el servidor: {e}")
     finally:
         server.stop_server()
+        server.results(save_path=save_path)
 
-        print(server.metrics)
 
-
-def run_client(host, port, gray=True, normalize=True, lr=0.01):
-    client = CIFAR10Worker(host, port, gray=gray, normalize=normalize, lr=lr)
+def run_client(host, port, gray=True, normalize=True, lr=0.01, save_path=None):
+    client = CIFAR10Worker(
+        host,
+        port,
+        gray=gray,
+        normalize=normalize,
+        lr=lr,
+    )
 
     try:
         client.run()
@@ -44,6 +50,9 @@ def run_client(host, port, gray=True, normalize=True, lr=0.01):
         print(f"Error al iniciar el cliente: {e}")
     finally:
         client.close()
+
+        if save_path:
+            client.save_metrics(save_path)
 
 
 if __name__ == "__main__":
@@ -61,6 +70,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--worker", action="store_true")
 
+    parser.add_argument("--save", type=str, default=None)
+
     args = parser.parse_args()
 
     if args.worker:
@@ -70,6 +81,7 @@ if __name__ == "__main__":
             gray=not args.rgb,
             normalize=args.normalize,
             lr=args.lr,
+            save_path=args.save,
         )
     else:
         run_server(
@@ -80,4 +92,5 @@ if __name__ == "__main__":
             lr=args.lr,
             workers=args.workers,
             min_workers=args.min_workers,
+            save_path=args.save,
         )

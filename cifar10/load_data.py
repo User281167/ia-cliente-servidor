@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
 
 cifar10_classes = (
     "avión",

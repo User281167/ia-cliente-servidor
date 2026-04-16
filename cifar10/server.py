@@ -1,13 +1,18 @@
+import os
+import time
+
 import numpy as np
 import pandas as pd
 import torch
+from torchmetrics.classification import MulticlassConfusionMatrix
 
 from ddp import DDPServer
 from ddp.logger import log
 from ddp.message import DDPMessage
 from ddp.pickle_utils import send_msg
+from utils import format_elapse, plot_confusion_matrix, plot_grid, time_wrapper
 
-from .load_data import get_cifar10_dataloader
+from .load_data import cifar10_classes, get_cifar10_dataloader
 from .model import Cifar10Model
 
 
@@ -23,6 +28,11 @@ class CIFAR10Server(DDPServer):
         min_workers: int = 1,
     ):
         super().__init__(workers, min_workers)
+        self.gray = gray
+        self.normalize = normalize
+        self.conv = conv
+        self.lr = lr
+
         self.model = Cifar10Model(gray=gray, conv=conv)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -35,8 +45,62 @@ class CIFAR10Server(DDPServer):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.metrics = pd.DataFrame(
-            columns=["loss", "accuracy", "eval_loss", "eval_accuracy"]
+            columns=[
+                "loss",
+                "accuracy",
+                "eval_loss",
+                "eval_accuracy",
+                "grad_norm",
+                "elapsed",
+            ]
         )
+
+    def results(self, save_path: str | None):
+        if save_path:
+            os.makedirs(save_path, exist_ok=True)
+
+        if save_path:
+            self.metrics.to_excel(os.path.join(save_path, "metrics_server.xlsx"))
+
+            description = self.metrics.describe(percentiles=[0.1, 0.5, 0.9])
+            description.to_excel(
+                os.path.join(save_path, "description_server.xlsx"),
+                index=True,
+            )
+
+        plot_grid(
+            history=[
+                (
+                    (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
+                    ((self.metrics["accuracy"][i], self.metrics["eval_accuracy"][i])),
+                    self.metrics["grad_norm"][i],
+                )
+                for i in range(len(self.metrics))
+            ],
+            labels=[
+                ("Loss", "Train", "Test"),
+                ("Accuracy", "Train", "Test"),
+                "Grad Norm",
+            ],
+            n_cols=1,
+            save_path=save_path,
+        )
+
+        # evaluate classification
+        acc, conf = self.evaluate_classification()
+        plot_confusion_matrix(conf, save_path=save_path, class_names=cifar10_classes)
+
+        # argumentos
+        if save_path:
+            with open(os.path.join(save_path, "train_params.txt"), "w") as f:
+                f.write(f"epochs: {self.epochs}\n")
+                f.write(f"lr: {self.lr}\n")
+                f.write(f"workers: {self.workers}\n")
+                f.write(f"min_workers: {self.min_workers}\n")
+                f.write(f"gray: {self.gray}\n")
+                f.write(f"normalize: {self.normalize}\n")
+                f.write(f"conv: {self.conv}\n")
+                f.write(f"Final accuracy: {acc}")
 
     def evaluate(self):
         total_loss = 0
@@ -58,6 +122,27 @@ class CIFAR10Server(DDPServer):
 
         return total_loss / total, correct / total
 
+    def evaluate_classification(self):
+        """Evalua accuracy y confusion matrix en el test set."""
+        self.model.eval()
+        correct = 0
+        total = 0
+        confusion_matrix = MulticlassConfusionMatrix(num_classes=10).to(self.device)
+
+        with torch.no_grad():
+            for images, labels in self.test_loader:
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                outputs = self.model(images)
+                _, predicted = torch.max(outputs, 1)
+
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+                confusion_matrix.update(predicted, labels)
+
+        return correct / total, confusion_matrix.compute().cpu()
+
     def _send_assign(self, n_workers: int, epoch: int):
         with self._workers_lock:
             items = list(self._workers.items())
@@ -78,6 +163,7 @@ class CIFAR10Server(DDPServer):
                 log.warning(f"Worker {wid} fallo assign: {e}")
 
     def step(self):
+        t0 = time.perf_counter()
         n_workers = self._wait_workers()
 
         if n_workers is None:
@@ -99,6 +185,7 @@ class CIFAR10Server(DDPServer):
 
         accum_grads: dict[str, torch.Tensor] = {}
 
+        # acomular gradientes
         for msg in results:
             grads = msg["payload"]["grads"]
 
@@ -114,14 +201,21 @@ class CIFAR10Server(DDPServer):
         for k in accum_grads:
             accum_grads[k] /= len(results)
 
+        gnorm = 0.0  # norma L2
+
         # aplicar gradientes
         for name, param in self.model.named_parameters():
-            param.grad = accum_grads[name].detach().clone()
+            g = accum_grads[name] / len(results)
+            param.grad = g.detach()
+            gnorm += (g**2).sum().item()
+
+        gnorm = gnorm**0.5
 
         # optimizar
         self.optimizer.step()
         self.optimizer.zero_grad()
 
+        elapsed = time.perf_counter() - t0
         loss = float(sum(r["payload"]["loss"] for r in results) / len(results))
         accuracy = float(sum(r["payload"]["accuracy"] for r in results) / len(results))
 
@@ -132,14 +226,17 @@ class CIFAR10Server(DDPServer):
             accuracy,
             eval_loss,
             eval_accuracy,
+            gnorm,
+            elapsed,
         ]
 
         log.info(
-            f"Epoch {self.current_epoch} - loss: {loss:.4f} - accuracy: {accuracy:.4f} - eval_loss: {eval_loss:.4f} - eval_accuracy: {eval_accuracy:.4f}"
+            f"Epoch {self.current_epoch}/{self.epochs} - loss: {loss:.4f} - accuracy: {accuracy:.4f} - eval_loss: {eval_loss:.4f} - eval_accuracy: {eval_accuracy:.4f} - gnorm: {gnorm:.4f} - elapsed: {format_elapse(elapsed)}"
         )
 
         self.current_epoch += 1
 
+    @time_wrapper
     def train(self):
         while self.current_epoch < self.epochs:
             self.step()

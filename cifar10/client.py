@@ -1,4 +1,8 @@
+import os
+import time
+
 import numpy as np
+import pandas as pd
 import torch
 
 from ddp import DDPClient
@@ -27,7 +31,23 @@ class CIFAR10Worker(DDPClient):
         self.rank = 0
         self.world_size = 1
 
+        self.metrics = pd.DataFrame(
+            columns=["loss", "accuracy", "elapse", "throughput"]
+        )
+
         self._register_handlers()
+
+    def save_metrics(self, path: str):
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+
+        self.metrics.to_excel(
+            os.path.join(path, f"metrics_{self.rank}.xlsx"), index=False
+        )
+        description = self.metrics.describe(percentiles=[0.1, 0.5, 0.9])
+        description.to_excel(
+            os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=False
+        )
 
     def get_batch(self, epoch):
         N = len(self.dataset)
@@ -62,6 +82,8 @@ class CIFAR10Worker(DDPClient):
 
         @self.on("step")
         def on_step(msg):
+            t0 = time.perf_counter()
+
             epoch = msg["epoch"]
 
             batch_idx = self.get_batch(epoch)
@@ -87,7 +109,14 @@ class CIFAR10Worker(DDPClient):
             acc = float((logits.argmax(1) == y).float().mean().item())
             loss = float(loss.item())
 
-            print(f"Worker {self.rank}: epoch={epoch}, acc={acc:.4f}, loss={loss:.4f}")
+            elapse = time.perf_counter() - t0
+            throughput = len(X) / elapse
+
+            print(
+                f"Worker {self.rank}: epoch={epoch}, acc={acc:.4f}, loss={loss:.4f}, elapse={elapse:.4f}, throughput={throughput:.4f}"
+            )
+
+            self.metrics.loc[len(self.metrics)] = [acc, loss, elapse, throughput]
 
             send_msg(
                 self._sock,
