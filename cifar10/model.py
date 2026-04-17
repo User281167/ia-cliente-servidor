@@ -2,6 +2,16 @@ import torch.nn as nn
 
 
 class Cifar10Model(nn.Module):
+    """
+    Modelo para el entrenamiento distribuido de CIFAR-10.
+    Red simple convolucional o fully connected.
+
+    Uso de:
+        - LeakyReLU evitar vanishing gradient neuronas que mantienen inactivas
+        - Dropout evitar overfitting
+        - Conv2d convolución 2D para extraer características de las imágenes
+    """
+
     def __init__(self, gray=True, conv=False):
         super().__init__()
 

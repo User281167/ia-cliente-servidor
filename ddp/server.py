@@ -179,6 +179,8 @@ class DDPServer(ABC):
     # Accept loop (hilo daemon)
 
     def _accept_loop(self) -> None:
+        """Bucle principal que acepta conexiones de workers en segundo plano."""
+
         if not self._server_sock:
             log.warning("Server socket no está inicializado")
             return
@@ -201,7 +203,7 @@ class DDPServer(ABC):
             ).start()
 
     def _handshake_worker(self, conn: socket.socket, addr) -> None:
-        """Asigna worker_id y espera 'ready'"""
+        """Asigna worker_id y espera 'ready' del worker."""
         try:
             msg = recv_ddp(conn)
 

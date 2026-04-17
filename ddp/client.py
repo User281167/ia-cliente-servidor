@@ -11,6 +11,16 @@ from .pickle_utils import recv_msg, send_msg
 
 
 class HandlerRegistry:
+    """
+    Registro de handlers para mensajes del cliente DDP.
+    Permite asociar funciones a tipos de mensajes específicos.
+
+    ej:
+        @registry.on(MSG_ASSIGN)
+        def handle_assign(msg):
+            print(msg)
+    """
+
     def __init__(self):
         self._handlers = {}
 
@@ -33,8 +43,6 @@ class DDPClient(ABC):
       - Conexión / reconexión TCP
       - Loop de mensajes
       - Despacho a handlers por tipo de mensaje
-
-    Subclases implementan `run()` que define qué hacer con cada mensaje.
     """
 
     RECONNECT_DELAY = 3  # segundos entre intentos de reconexión
@@ -120,6 +128,14 @@ class DDPClient(ABC):
 
     # eventos
     def on(self, msg_type):
+        """
+        Decorador para registrar un handler para un tipo de mensaje específico.
+
+        ej:
+            @client.on(MSG_ASSIGN)
+            def handle_assign(msg):
+                print(msg)
+        """
         return self._handlers.on(msg_type)
 
     def _loop(self) -> None:
@@ -150,5 +166,6 @@ class DDPClient(ABC):
                 self._reconnect()
 
     def run(self):
+        """Ejecuta el cliente DDP, conectándose y entrando en el loop principal para escuchar mensajes."""
         self.connect()
         self._loop()

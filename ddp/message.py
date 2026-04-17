@@ -1,10 +1,24 @@
+"""
+Módulo para la creación y manipulación de mensajes DDP (Distributed Data Parallel).
+Permite la creación estandarizada de mensajes para la comunicación en paralelo entre workers y servidor.
+Evitando errores comunes como escribir mal el tipo de mensaje o pasar argumentos incorrectos.
+"""
+
 from .pickle_utils import recv_msg
 
 
 def recv_ddp(sock):
+    """
+    Recibe un mensaje DDP del socket y lo parsea.
+    Verifica que el contenido sea válido y que el tipo de mensaje sea reconocido.
+    """
     return DDPMessage.parse(recv_msg(sock))
 
 
+"""
+Constantes para los tipos de mensajes DDP.
+Mensajes comunes para la comunicación entre workers y servidor en paralelo.
+"""
 MSG_WEIGHTS = "weights"
 MSG_STEP = "step"
 MSG_RESULT = "result"
@@ -14,6 +28,11 @@ MSG_READY = "ready"
 
 
 class DDPMessage:
+    """
+    Clase para la creación y manipulación de mensajes DDP.
+    Proporciona métodos estáticos para crear mensajes comunes.
+    """
+
     @staticmethod
     def weights(state):
         return {"type": MSG_WEIGHTS, "payload": state}

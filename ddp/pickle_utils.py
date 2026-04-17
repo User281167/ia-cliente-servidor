@@ -1,3 +1,7 @@
+"""
+Módulo para la serialización y envío de mensajes usando pickle.
+"""
+
 import pickle
 import socket
 

@@ -4,6 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+from torchinfo import summary
 from torchmetrics.classification import MulticlassConfusionMatrix
 
 from ddp import DDPServer
@@ -17,6 +18,10 @@ from .model import Cifar10Model
 
 
 class CIFAR10Server(DDPServer):
+    """
+    Servidor para el entrenamiento distribuido del modelo CIFAR-10.
+    """
+
     def __init__(
         self,
         gray: bool = False,
@@ -33,16 +38,19 @@ class CIFAR10Server(DDPServer):
         self.conv = conv
         self.lr = lr
 
-        self.model = Cifar10Model(gray=gray, conv=conv)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.model = Cifar10Model(gray=gray, conv=conv).to(self.device)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        summary(self.model, input_size=(1, 1 if gray else 3, 32, 32))
+
         self.epochs = epochs
         self.current_epoch = 0
 
         self.test_loader = get_cifar10_dataloader(
             train=False, gray=gray, normalize=normalize
         )
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.metrics = pd.DataFrame(
             columns=[
@@ -73,6 +81,7 @@ class CIFAR10Server(DDPServer):
         plot_grid(
             history=[
                 (
+                    # unir train/test en una sola gráfica
                     (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
                     ((self.metrics["accuracy"][i], self.metrics["eval_accuracy"][i])),
                     self.metrics["grad_norm"][i],
@@ -104,29 +113,28 @@ class CIFAR10Server(DDPServer):
                 f.write(f"conv: {self.conv}\n")
                 f.write(f"Final accuracy: {acc}")
 
-    def evaluate(self):
+    def evaluate(self) -> tuple[float, float]:
         """Evalua el modelo en el test set y devuelve loss y accuracy."""
         self.model.eval()
         total_loss = 0
         correct = 0
         total = 0
 
-        with torch.no_grad():
+        with torch.no_grad():  # no se actualizan los pesos
             for x, y in self.test_loader:
                 x, y = x.to(self.device), y.to(self.device)
 
                 logits = self.model(x)
                 loss = self.criterion(logits, y)
 
-                total_loss += loss.item()
-
+                total_loss += loss.item() * y.size(0)
                 preds = logits.argmax(dim=1)
                 correct += (preds == y).sum().item()
                 total += y.size(0)
 
         return total_loss / total, correct / total
 
-    def evaluate_classification(self):
+    def evaluate_classification(self) -> tuple[float, torch.Tensor]:
         """Evalua accuracy y confusion matrix en el test set."""
         self.model.eval()
         correct = 0
@@ -183,6 +191,7 @@ class CIFAR10Server(DDPServer):
             log.warning("Timeout esperando workers (saltar época)")
             return
 
+        # pesos y parámetros del modelo en pytorch
         state = {
             k: v.detach().cpu().numpy().astype(np.float32)
             for k, v in self.model.state_dict().items()
@@ -215,9 +224,13 @@ class CIFAR10Server(DDPServer):
         for k in accum_grads:
             accum_grads[k] /= len(results)
 
-        gnorm = 0.0  # norma L2
+        # Norma L2
+        # Permite saber cuanto se está moviendo el gradiente en cada iteración
+        # Permite observar desvanecimiento o explotación del gradiente
+        gnorm = 0.0
 
-        # aplicar gradientes
+        # Aplicar gradientes
+        # actualizar modelo de pytorch
         for name, param in self.model.named_parameters():
             g = accum_grads[name] / len(results)
             param.grad = g.detach()
@@ -252,10 +265,12 @@ class CIFAR10Server(DDPServer):
 
     @time_wrapper
     def train(self):
+        """Entrena el modelo durante el número de épocas especificado."""
         while self.current_epoch < self.epochs:
             self.step()
 
     def run(self, host: str = "0.0.0.0", port: int = 9999):
+        """Inicia el servidor y entrena el modelo."""
         self.start_server(host=host, port=port)
 
         try:

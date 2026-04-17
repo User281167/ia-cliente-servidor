@@ -4,6 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+from torchinfo import summary
 
 from ddp import DDPClient
 from ddp.pickle_utils import send_msg
@@ -13,14 +14,19 @@ from .model import Cifar10Model
 
 
 class CIFAR10Worker(DDPClient):
-    def __init__(self, host, port, gray=True, normalize=True, lr=0.01):
+    """
+    Cliente worker para el entrenamiento distribuido de CIFAR-10.
+    """
+
+    def __init__(self, host, port, gray=True, normalize=True, conv=False, lr=0.01):
         super().__init__(host, port)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = Cifar10Model(gray=gray).to(self.device)
+        self.model = Cifar10Model(gray=gray, conv=conv).to(self.device)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
+        summary(self.model, input_size=(1, 1 if gray else 3, 32, 32))
 
         self.dataset = preload_cifar10_to_ram(
             train=True,
@@ -46,11 +52,15 @@ class CIFAR10Worker(DDPClient):
         )
         description = self.metrics.describe(percentiles=[0.1, 0.5, 0.9])
         description.to_excel(
-            os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=False
+            os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=True
         )
 
     def get_batch(self, epoch):
-        """Obtiene un lote de datos para la época dada."""
+        """
+        Obtiene un lote de datos para la época dada.
+        Realizar shuffle global y shard (toma de datos) local.
+        Evita que los datos sean siempre los mismos en cada época y que se solapen entre workers.
+        """
         N = len(self.dataset)
 
         rng = np.random.default_rng(seed=epoch)
@@ -63,7 +73,10 @@ class CIFAR10Worker(DDPClient):
         return shard
 
     def _register_handlers(self):
-        """Registra los manejadores de mensajes."""
+        """
+        Registra los manejadores de mensajes del servidor.
+        Ejecuta las funciones correspondientes cuando se reciben mensajes del servidor.
+        """
 
         @self.on("assign")
         def on_assign(msg):
@@ -85,6 +98,11 @@ class CIFAR10Worker(DDPClient):
 
         @self.on("step")
         def on_step(msg):
+            """
+            Manejador para el mensaje "step".
+            Recibe un lote de datos y realiza una iteración de entrenamiento.
+            No realiza optimización ni actualización de pesos.
+            """
             t0 = time.perf_counter()
 
             epoch = msg["epoch"]

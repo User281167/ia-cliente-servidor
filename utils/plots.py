@@ -2,16 +2,41 @@ from typing import List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 
 
 def plot_confusion_matrix(
-    conf_matrix, save_path: str | None = None, class_names: List[str] | None = None
+    conf_matrix: torch.Tensor | np.ndarray,
+    save_path: str | None = None,
+    class_names: list[str] | None = None,
 ):
+    """
+    Gráfica una matriz de confusión mostrando:
+    - Conteo absoluto
+    - Porcentaje por fila (clase real)
+
+    Args:
+        conf_matrix: Matriz de confusión.
+        save_path: Ruta para guardar la imagen (opcional).
+        class_names: Lista de nombres de clases (opcional).
+    """
+    # Convertir a float para normalización
+    if isinstance(conf_matrix, torch.Tensor):
+        conf_matrix = conf_matrix.float()
+        conf_matrix_np = conf_matrix.cpu().numpy()
+    else:
+        conf_matrix_np = conf_matrix.astype(float)
+
+    # Normalización por filas (porcentaje)
+    row_sums = conf_matrix_np.sum(axis=1, keepdims=True)
+    conf_matrix_norm = conf_matrix_np / np.clip(row_sums, 1e-8, None)
+
+    # Plot base
     fig, ax = plt.subplots(figsize=(8, 7))
-    im = ax.imshow(conf_matrix, interpolation="nearest", cmap="Blues")
+    im = ax.imshow(conf_matrix_norm, interpolation="nearest", cmap="Blues")
     fig.colorbar(im, ax=ax)
 
-    num_classes = conf_matrix.shape[0]
+    num_classes = conf_matrix_np.shape[0]
     label_position = list(range(num_classes))
     labels = label_position if class_names is None else class_names
 
@@ -22,28 +47,30 @@ def plot_confusion_matrix(
         yticklabels=labels,
         xlabel="Predicted label",
         ylabel="True label",
-        title="MNIST Confusion Matrix",
+        title="Confusion Matrix",
     )
 
-    threshold = conf_matrix.max().item() / 2 if conf_matrix.numel() else 0
-    for i in range(conf_matrix.shape[0]):
-        for j in range(conf_matrix.shape[1]):
-            value = int(conf_matrix[i, j].item())
+    # Texto en cada celda (conteo + porcentaje)
+    for i in range(num_classes):
+        for j in range(num_classes):
+            value = int(conf_matrix_np[i, j])
+            percentage = conf_matrix_norm[i, j]
 
             ax.text(
                 j,
                 i,
-                value,
+                f"{value}\n{percentage:.1%}",
                 ha="center",
                 va="center",
-                color="white" if value > threshold else "black",
+                fontsize=9,
+                color="white" if percentage > 0.5 else "black",
             )
 
-    fig.tight_layout()
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    fig.tight_layout()
 
     if save_path:
-        plt.savefig(f"{save_path}/confusion_matrix.png")
+        plt.savefig(f"{save_path}/confusion_matrix.png", dpi=300, bbox_inches="tight")
     else:
         plt.show()
 
@@ -54,6 +81,9 @@ def plot_grid(
     n_cols: int | None = None,
     save_path: str | None = None,
 ):
+    """
+    Graficar varias métricas en una cuadrícula.
+    """
     if not history:
         return
 
