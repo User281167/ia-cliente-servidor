@@ -29,14 +29,15 @@ class CIFAR10Server(DDPServer):
         conv: bool = False,
         epochs: int = 20,
         lr: float = 0.001,
-        workers: int = 1,
+        batch_size: int = 128,
         min_workers: int = 1,
     ):
-        super().__init__(workers, min_workers)
+        super().__init__(min_workers)
         self.gray = gray
         self.normalize = normalize
         self.conv = conv
         self.lr = lr
+        self.batch_size = batch_size
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -111,6 +112,7 @@ class CIFAR10Server(DDPServer):
                 f.write(f"gray: {self.gray}\n")
                 f.write(f"normalize: {self.normalize}\n")
                 f.write(f"conv: {self.conv}\n")
+                f.write(f"batch_size: {self.batch_size}\n")
                 f.write(f"Final accuracy: {acc}")
 
     def evaluate(self) -> tuple[float, float]:
@@ -169,6 +171,7 @@ class CIFAR10Server(DDPServer):
                 rank=i,
                 world_size=n_workers,
                 epoch=epoch,
+                batch_size=self.batch_size,
             )
 
             self._assignments[wid] = msg

@@ -10,7 +10,7 @@ def run_server(
     conv: bool = False,
     epochs: int = 20,
     lr: float = 0.001,
-    workers: int = 1,
+    batch_size: int = 128,
     min_workers: int = 1,
     host: str = "0.0.0.0",
     port: int = 9090,
@@ -22,7 +22,7 @@ def run_server(
         conv=conv,
         epochs=epochs,
         lr=lr,
-        workers=workers,
+        batch_size=batch_size,
         min_workers=min_workers,
     )
 
@@ -68,10 +68,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--conv", action="store_true")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--min_workers", type=int, default=1)
 
     parser.add_argument("--worker", action="store_true")
+    parser.add_argument("--batch_size", type=int, default=128)
 
     parser.add_argument("--save", type=str, default=None)
 
@@ -94,7 +94,7 @@ if __name__ == "__main__":
             conv=args.conv,
             epochs=args.epochs,
             lr=args.lr,
-            workers=args.workers,
+            batch_size=args.batch_size,
             min_workers=args.min_workers,
             save_path=args.save,
         )

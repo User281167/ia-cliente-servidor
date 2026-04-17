@@ -53,7 +53,7 @@ class DDPServer(ABC):
     RECONNECT_WINDOW = 30  # segundos que un worker tiene para reconectarse
     PING_INTERVAL = 30  # segundos entre health-pings (heartbeat futuro)
 
-    def __init__(self, workers: int = 1, min_workers: int = 1):
+    def __init__(self, min_workers: int = 1):
         """
         Inicializa el servidor DDP con el número de workers y el mínimo requerido.
 
@@ -62,7 +62,6 @@ class DDPServer(ABC):
             min_workers (int): Número mínimo de workers requeridos para iniciar el entrenamiento y actualizar parametros.
         """
 
-        self.workers = workers
         self.min_workers = min_workers
 
         self._server_sock: Optional[socket.socket] = None

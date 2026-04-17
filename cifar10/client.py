@@ -7,7 +7,7 @@ import torch
 from torchinfo import summary
 
 from ddp import DDPClient
-from ddp.pickle_utils import send_msg
+from ddp.pickle_utils import log, send_msg
 
 from .load_data import preload_cifar10_to_ram
 from .model import Cifar10Model
@@ -36,6 +36,7 @@ class CIFAR10Worker(DDPClient):
 
         self.rank = 0
         self.world_size = 1
+        self.batch_size = 128
 
         self.metrics = pd.DataFrame(
             columns=["loss", "accuracy", "elapse", "throughput"]
@@ -55,7 +56,7 @@ class CIFAR10Worker(DDPClient):
             os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=True
         )
 
-    def get_batch(self, epoch):
+    def get_shard(self, epoch):
         """
         Obtiene un lote de datos para la época dada.
         Realizar shuffle global y shard (toma de datos) local.
@@ -72,6 +73,18 @@ class CIFAR10Worker(DDPClient):
 
         return shard
 
+    def get_batch(self, epoch):
+        """
+        Minibatches para no entrenar con todo el conjunto y explotar la memoria.
+        """
+        shard = self.get_shard(epoch)
+        # evitar el batch incompleto
+        n = (len(shard) // self.batch_size) * self.batch_size
+        shard = shard[:n]
+
+        for i in range(0, n, self.batch_size):
+            yield shard[i : i + self.batch_size]
+
     def _register_handlers(self):
         """
         Registra los manejadores de mensajes del servidor.
@@ -84,6 +97,7 @@ class CIFAR10Worker(DDPClient):
 
             self.rank = payload["rank"]
             self.world_size = payload["world_size"]
+            self.batch_size = payload["batch_size"]
 
         @self.on("weights")
         def on_weights(msg):
@@ -107,19 +121,33 @@ class CIFAR10Worker(DDPClient):
 
             epoch = msg["epoch"]
 
-            batch_idx = self.get_batch(epoch)
-            X, y = self.dataset[batch_idx]
-
-            X = X.to(self.device)
-            y = y.to(self.device)
-
             self.model.train()
             self.optimizer.zero_grad()
 
-            logits = self.model(X)
-            loss = self.criterion(logits, y)
+            total_loss = torch.tensor(0.0)
+            total_correct = torch.tensor(0.0)
+            total_samples = torch.tensor(0.0)
+            n_batches = 0
 
-            loss.backward()
+            for batch_idx in self.get_batch(epoch):
+                X, y = self.dataset[batch_idx]
+                X, y = X.to(self.device), y.to(self.device)
+
+                outputs = self.model(X)
+                loss = self.criterion(outputs, y)
+
+                loss.backward()  # acumula gradientes crudos, sin dividir
+
+                total_loss += loss.item()
+                _, preds = torch.max(outputs, 1)
+                total_correct += (preds == y).sum().item()
+                total_samples += y.size(0)
+                n_batches += 1
+
+            # promedio de los batches
+            for param in self.model.parameters():
+                if param.grad is not None:
+                    param.grad /= total_samples  # promedio exacto sobre el shard
 
             grads = {
                 name: param.grad.detach().cpu().numpy().astype(np.float32)
@@ -127,17 +155,22 @@ class CIFAR10Worker(DDPClient):
                 if param.grad is not None
             }
 
-            acc = float((logits.argmax(1) == y).float().mean().item())
-            loss = float(loss.item())
+            avg_acc = (total_correct / total_samples).item()
+            avg_loss = (total_loss / (n_batches * self.world_size)).item()
 
             elapse = time.perf_counter() - t0
-            throughput = len(X) / elapse
+            throughput = total_samples / elapse
 
-            print(
-                f"Worker {self.rank}: epoch={epoch}, acc={acc:.4f}, loss={loss:.4f}, elapse={elapse:.4f}, throughput={throughput:.4f}"
+            log.info(
+                f"Worker {self.rank}: epoch={epoch}, acc={avg_acc:.4f}, loss={avg_loss:.4f}, elapse={elapse:.4f}, throughput={throughput:.4f}"
             )
 
-            self.metrics.loc[len(self.metrics)] = [acc, loss, elapse, throughput]
+            self.metrics.loc[len(self.metrics)] = [
+                avg_loss,
+                avg_acc,
+                elapse,
+                throughput,
+            ]
 
             send_msg(
                 self._sock,
@@ -145,8 +178,8 @@ class CIFAR10Worker(DDPClient):
                     "type": "result",
                     "payload": {
                         "grads": grads,
-                        "loss": loss,
-                        "accuracy": acc,
+                        "loss": avg_loss,
+                        "accuracy": avg_acc,
                     },
                 },
             )
