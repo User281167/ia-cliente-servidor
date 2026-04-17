@@ -25,6 +25,7 @@ MSG_RESULT = "result"
 MSG_ASSIGN = "assign"
 MSG_DONE = "done"
 MSG_READY = "ready"
+MSG_CONFIG = "config"
 
 
 class DDPMessage:
@@ -47,6 +48,10 @@ class DDPMessage:
             "type": MSG_RESULT,
             "payload": {"grads": grads, "loss": loss, "n_samples": n},
         }
+
+    @staticmethod
+    def config(**data):
+        return {"type": MSG_CONFIG, "payload": data}
 
     @staticmethod
     def assign(worker_id, **data):

@@ -18,21 +18,15 @@ class CIFAR10Worker(DDPClient):
     Cliente worker para el entrenamiento distribuido de CIFAR-10.
     """
 
-    def __init__(self, host, port, gray=True, normalize=True, conv=False, lr=0.01):
+    def __init__(self, host, port):
         super().__init__(host, port)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = Cifar10Model(gray=gray, conv=conv).to(self.device)
-        self.criterion = torch.nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
-        summary(self.model, input_size=(1, 1 if gray else 3, 32, 32))
-
-        self.dataset = preload_cifar10_to_ram(
-            train=True,
-            gray=gray,
-            normalize=normalize,
-        )
+        self.model = None
+        self.criterion = None
+        self.optimizer = None
+        self.dataset = None
 
         self.rank = 0
         self.world_size = 1
@@ -91,13 +85,35 @@ class CIFAR10Worker(DDPClient):
         Ejecuta las funciones correspondientes cuando se reciben mensajes del servidor.
         """
 
+        @self.on("config")
+        def on_config(msg):
+            log.info(f"Recibido mensaje de configuración: {msg}")
+
+            payload = msg["payload"]
+            gray = payload["gray"]
+            normalize = payload["normalize"]
+            conv = payload["conv"]
+            lr = payload["lr"]
+
+            self.model = Cifar10Model(gray=gray, conv=conv).to(self.device)
+            self.criterion = torch.nn.CrossEntropyLoss()
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
+            summary(self.model, input_size=(1, 1 if gray else 3, 32, 32))
+
+            self.batch_size = payload["batch_size"]
+
+            self.dataset = preload_cifar10_to_ram(
+                train=True,
+                gray=gray,
+                normalize=normalize,
+            )
+
         @self.on("assign")
         def on_assign(msg):
             payload = msg["payload"]
 
             self.rank = payload["rank"]
             self.world_size = payload["world_size"]
-            self.batch_size = payload["batch_size"]
 
         @self.on("weights")
         def on_weights(msg):

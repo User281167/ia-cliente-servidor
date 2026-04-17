@@ -53,7 +53,7 @@ class DDPServer(ABC):
     RECONNECT_WINDOW = 30  # segundos que un worker tiene para reconectarse
     PING_INTERVAL = 30  # segundos entre health-pings (heartbeat futuro)
 
-    def __init__(self, min_workers: int = 1):
+    def __init__(self, min_workers: int = 1, worker_config: dict | None = None):
         """
         Inicializa el servidor DDP con el número de workers y el mínimo requerido.
 
@@ -63,6 +63,7 @@ class DDPServer(ABC):
         """
 
         self.min_workers = min_workers
+        self.worker_config = worker_config
 
         self._server_sock: Optional[socket.socket] = None
         self._port: Optional[int] = None
@@ -234,6 +235,9 @@ class DDPServer(ABC):
             # Confirmar asignación
             assign = self._assignments.get(wid, {})
             send_msg(conn, DDPMessage.assign(wid, **assign))
+
+            if self.worker_config:
+                send_msg(conn, DDPMessage.config(**self.worker_config))
         except Exception as e:
             log.warning(f"Error en handshake con {addr}: {e}")
             conn.close()

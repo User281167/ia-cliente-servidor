@@ -32,7 +32,16 @@ class CIFAR10Server(DDPServer):
         batch_size: int = 128,
         min_workers: int = 1,
     ):
-        super().__init__(min_workers)
+        config = {
+            "gray": gray,
+            "normalize": normalize,
+            "conv": conv,
+            "epochs": epochs,
+            "lr": lr,
+            "batch_size": batch_size,
+        }
+
+        super().__init__(min_workers, config)
         self.gray = gray
         self.normalize = normalize
         self.conv = conv
@@ -171,7 +180,6 @@ class CIFAR10Server(DDPServer):
                 rank=i,
                 world_size=n_workers,
                 epoch=epoch,
-                batch_size=self.batch_size,
             )
 
             self._assignments[wid] = msg

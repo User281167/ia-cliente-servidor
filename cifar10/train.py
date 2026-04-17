@@ -35,17 +35,8 @@ def run_server(
         server.results(save_path=save_path)
 
 
-def run_client(
-    host, port, gray=True, normalize=True, conv=False, lr=0.01, save_path=None
-):
-    client = CIFAR10Worker(
-        host,
-        port,
-        gray=gray,
-        normalize=normalize,
-        conv=conv,
-        lr=lr,
-    )
+def run_client(host, port, save_path=None):
+    client = CIFAR10Worker(host, port)
 
     try:
         client.run()
@@ -81,10 +72,6 @@ if __name__ == "__main__":
         run_client(
             args.host,
             args.port,
-            gray=not args.rgb,
-            normalize=args.normalize,
-            conv=args.conv,
-            lr=args.lr,
             save_path=args.save,
         )
     else:
