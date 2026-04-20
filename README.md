@@ -28,5 +28,5 @@ Servidor de parametros y worker
 python -m cifar10.train --epoch 10 --conv --normalize --rgb --save "results"
 
 # worker
-python -m cifar10.train --worker --host localhost --conv  --normalize --rgb --save "results"
+python -m cifar10.train --worker --host localhost --save "results"
 ```

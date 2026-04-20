@@ -26,7 +26,7 @@ class Cifar10Model(nn.Module):
                 nn.MaxPool2d(2, 2),
                 nn.Flatten(),
                 nn.Linear(64 * 8 * 8, 128),
-                nn.Dropout(p=0.2),
+                nn.Dropout(p=0.4),
                 nn.LeakyReLU(),
                 nn.Linear(128, 10),
             )
@@ -35,7 +35,7 @@ class Cifar10Model(nn.Module):
                 nn.Flatten(),
                 nn.Linear(1 * 32 * 32 if gray else 3 * 32 * 32, 128),
                 nn.LeakyReLU(),
-                nn.Dropout(p=0.2),
+                nn.Dropout(p=0.4),
                 nn.Linear(128, 32),
                 nn.LeakyReLU(),
                 nn.Linear(32, 10),

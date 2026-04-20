@@ -231,16 +231,13 @@ class CIFAR10Server(DDPServer):
                 else:
                     accum_grads[k] += g
 
-        # promedio
-        for k in accum_grads:
-            accum_grads[k] /= len(results)
-
         # Norma L2
         # Permite saber cuanto se está moviendo el gradiente en cada iteración
         # Permite observar desvanecimiento o explotación del gradiente
         gnorm = 0.0
 
         # Aplicar gradientes
+        # promedio de gradientes
         # actualizar modelo de pytorch
         for name, param in self.model.named_parameters():
             g = accum_grads[name] / len(results)
