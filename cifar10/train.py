@@ -59,10 +59,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--conv", action="store_true")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--min_workers", type=int, default=1)
+    parser.add_argument("--min-workers", type=int, default=1)
 
     parser.add_argument("--worker", action="store_true")
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch-size", type=int, default=128)
 
     parser.add_argument("--save", type=str, default=None)
 

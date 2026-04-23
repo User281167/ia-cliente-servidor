@@ -1,5 +1,6 @@
 import os
 import time
+from this import s
 
 import numpy as np
 import pandas as pd
@@ -94,13 +95,12 @@ class CIFAR10Worker(DDPClient):
             normalize = payload["normalize"]
             conv = payload["conv"]
             lr = payload["lr"]
+            self.batch_size = payload["batch_size"]
 
             self.model = Cifar10Model(gray=gray, conv=conv).to(self.device)
             self.criterion = torch.nn.CrossEntropyLoss()
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
             summary(self.model, input_size=(1, 1 if gray else 3, 32, 32))
-
-            self.batch_size = payload["batch_size"]
 
             self.dataset = preload_cifar10_to_ram(
                 train=True,
@@ -118,12 +118,7 @@ class CIFAR10Worker(DDPClient):
         @self.on("weights")
         def on_weights(msg):
             state = msg["payload"]
-
-            state_dict = self.model.state_dict()
-
-            for k in state_dict:
-                state_dict[k] = torch.tensor(state[k])
-
+            state_dict = {k: torch.tensor(v) for k, v in state.items()}
             self.model.load_state_dict(state_dict)
 
         @self.on("step")
@@ -136,43 +131,45 @@ class CIFAR10Worker(DDPClient):
             t0 = time.perf_counter()
 
             epoch = msg["epoch"]
+            w_global = {k: v.clone() for k, v in self.model.state_dict().items()}
 
-            self.model.train()
-            self.optimizer.zero_grad()
-
-            total_loss = torch.tensor(0.0)
-            total_correct = torch.tensor(0.0)
-            total_samples = torch.tensor(0.0)
+            total_loss, total_correct, total_samples = 0.0, 0, 0
+            steps_done = 0
             n_batches = 0
 
             for batch_idx in self.get_batch(epoch):
                 X, y = self.dataset[batch_idx]
                 X, y = X.to(self.device), y.to(self.device)
 
+                self.optimizer.zero_grad()
                 outputs = self.model(X)
+
                 loss = self.criterion(outputs, y)
+                loss.backward()
+                self.optimizer.step()
 
-                loss.backward()  # acumula gradientes crudos, sin dividir
-
-                total_loss += loss.item()
                 _, preds = torch.max(outputs, 1)
+                total_loss += loss.item() * y.size(0)
                 total_correct += (preds == y).sum().item()
                 total_samples += y.size(0)
+                steps_done += 1
                 n_batches += 1
 
-            # promedio de los batches
-            for param in self.model.parameters():
-                if param.grad is not None:
-                    param.grad /= total_samples  # promedio exacto sobre el shard
+                if n_batches % 10 == 0:
+                    print(
+                        f"Batch {n_batches}, loss: {loss.item():.4f}, acc: {total_correct / total_samples:.4f}",
+                        end="\r",
+                    )
 
-            grads = {
-                name: param.grad.detach().cpu().numpy().astype(np.float32)
-                for name, param in self.model.named_parameters()
-                if param.grad is not None
+            # Δw = w_local - w_global
+            w_local = self.model.state_dict()
+            delta = {
+                k: (w_local[k] - w_global[k]).cpu().numpy().astype(np.float32)
+                for k in w_global
             }
 
-            avg_acc = (total_correct / total_samples).item()
-            avg_loss = (total_loss / (n_batches * self.world_size)).item()
+            avg_acc = total_correct / total_samples
+            avg_loss = total_loss / total_samples
 
             elapse = time.perf_counter() - t0
             throughput = total_samples / elapse
@@ -193,7 +190,8 @@ class CIFAR10Worker(DDPClient):
                 {
                     "type": "result",
                     "payload": {
-                        "grads": grads,
+                        "delta": delta,
+                        "samples": total_samples,
                         "loss": avg_loss,
                         "accuracy": avg_acc,
                     },

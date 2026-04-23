@@ -68,10 +68,11 @@ class CIFAR10Server(DDPServer):
                 "accuracy",
                 "eval_loss",
                 "eval_accuracy",
-                "grad_norm",
                 "elapsed",
             ]
         )
+
+        self.WORKER_TIMEOUT = 60 * (5 if conv else 1)
 
     def results(self, save_path: str | None):
         """Guarda las métricas en un archivo Excel y genera gráfico de resultados."""
@@ -101,7 +102,6 @@ class CIFAR10Server(DDPServer):
             labels=[
                 ("Loss", "Train", "Test"),
                 ("Accuracy", "Train", "Test"),
-                "Grad Norm",
             ],
             n_cols=1,
             save_path=save_path,
@@ -189,18 +189,52 @@ class CIFAR10Server(DDPServer):
             except Exception as e:
                 log.warning(f"Worker {wid} fallo assign: {e}")
 
+    def _aggregate(self, results):
+        """
+        Promedia los pesos de los workers.
+
+        FedAvg:
+            w_new = w_global + η * Σ (n_i/N)
+        """
+        payloads = [r["payload"] for r in results]
+        N_total = sum(r["samples"] for r in payloads)
+
+        accum_delta = {}
+
+        for i, msg in enumerate(results):
+            n_i = payloads[i]["samples"]
+            weight = n_i / N_total
+            delta_i = payloads[i]["delta"]
+
+            for k, d in delta_i.items():
+                d = torch.as_tensor(d)
+
+                if k not in accum_delta:
+                    accum_delta[k] = weight * d
+                else:
+                    accum_delta[k] += weight * d
+
+        # Aplicar delta al modelo global
+        state = self.model.state_dict()
+
+        for k in state:
+            state[k] = state[k] + eta * accum_delta[k]
+
+        self.model.load_state_dict(state)
+
     def step(self):
         """
         Ejecuta un paso de entrenamiento distribuido.
         Espera a que los workers estén listos, envía los pesos actuales,
         luego envía el mensaje de step y recopila los resultados.
         """
-        t0 = time.perf_counter()
         n_workers = self._wait_workers()
 
         if n_workers is None:
             log.warning("Timeout esperando workers (saltar época)")
             return
+
+        t0 = time.perf_counter()
 
         # pesos y parámetros del modelo en pytorch
         state = {
@@ -217,44 +251,21 @@ class CIFAR10Server(DDPServer):
             log.warning("No se recibieron resultados, saltando época")
             return
 
-        accum_grads: dict[str, torch.Tensor] = {}
+        self._aggregate(results)
 
-        # acomular gradientes
-        for msg in results:
-            grads = msg["payload"]["grads"]
+        # métricas
+        loss = sum(r["payload"]["loss"] * r["payload"]["samples"] for r in results)
+        accuracy = sum(
+            r["payload"]["accuracy"] * r["payload"]["samples"] for r in results
+        )
 
-            for k, g in grads.items():
-                g = torch.as_tensor(g)
-
-                if k not in accum_grads:
-                    accum_grads[k] = g.clone()
-                else:
-                    accum_grads[k] += g
-
-        # Norma L2
-        # Permite saber cuanto se está moviendo el gradiente en cada iteración
-        # Permite observar desvanecimiento o explotación del gradiente
-        gnorm = 0.0
-
-        # Aplicar gradientes
-        # promedio de gradientes
-        # actualizar modelo de pytorch
-        for name, param in self.model.named_parameters():
-            g = accum_grads[name] / len(results)
-            param.grad = g.detach()
-            gnorm += (g**2).sum().item()
-
-        gnorm = gnorm**0.5
-
-        # optimizar
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-
-        elapsed = time.perf_counter() - t0
-        loss = float(sum(r["payload"]["loss"] for r in results) / len(results))
-        accuracy = float(sum(r["payload"]["accuracy"] for r in results) / len(results))
+        N = sum(r["payload"]["samples"] for r in results)
+        loss /= N
+        accuracy /= N
 
         eval_loss, eval_accuracy = self.evaluate()
+        elapsed = time.perf_counter() - t0
+        gnorm = 0
 
         self.metrics.loc[self.current_epoch] = [
             loss,
