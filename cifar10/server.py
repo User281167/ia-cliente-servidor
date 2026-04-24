@@ -4,7 +4,6 @@ import time
 import numpy as np
 import pandas as pd
 import torch
-from torchinfo import summary
 from torchmetrics.classification import MulticlassConfusionMatrix
 
 from ddp import DDPServer
@@ -14,7 +13,7 @@ from ddp.pickle_utils import send_msg
 from utils import format_elapse, plot_confusion_matrix, plot_grid, time_wrapper
 
 from .load_data import cifar10_classes, get_cifar10_dataloader
-from .model import Cifar10Model
+from .model import cifar10_get_model
 
 
 class CIFAR10Server(DDPServer):
@@ -50,10 +49,9 @@ class CIFAR10Server(DDPServer):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = Cifar10Model(gray=gray, conv=conv).to(self.device)
-        self.criterion = torch.nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-        summary(self.model, input_size=(1, 1 if gray else 3, 32, 32))
+        self.model, self.criterion, self.optimizer = cifar10_get_model(
+            gray=gray, conv=conv, lr=lr, device=self.device
+        )
 
         self.epochs = epochs
         self.current_epoch = 0
@@ -95,7 +93,6 @@ class CIFAR10Server(DDPServer):
                     # unir train/test en una sola gráfica
                     (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
                     ((self.metrics["accuracy"][i], self.metrics["eval_accuracy"][i])),
-                    self.metrics["grad_norm"][i],
                 )
                 for i in range(len(self.metrics))
             ],
@@ -116,7 +113,6 @@ class CIFAR10Server(DDPServer):
             with open(os.path.join(save_path, "train_params.txt"), "w") as f:
                 f.write(f"epochs: {self.epochs}\n")
                 f.write(f"lr: {self.lr}\n")
-                f.write(f"workers: {self.workers}\n")
                 f.write(f"min_workers: {self.min_workers}\n")
                 f.write(f"gray: {self.gray}\n")
                 f.write(f"normalize: {self.normalize}\n")
@@ -194,7 +190,7 @@ class CIFAR10Server(DDPServer):
         Promedia los pesos de los workers.
 
         FedAvg:
-            w_new = w_global + η * Σ (n_i/N)
+            w_new = w_global + Σ (n_i/N)
         """
         payloads = [r["payload"] for r in results]
         N_total = sum(r["samples"] for r in payloads)
@@ -218,7 +214,7 @@ class CIFAR10Server(DDPServer):
         state = self.model.state_dict()
 
         for k in state:
-            state[k] = state[k] + eta * accum_delta[k]
+            state[k] = state[k] + accum_delta[k]
 
         self.model.load_state_dict(state)
 
@@ -226,7 +222,7 @@ class CIFAR10Server(DDPServer):
         """
         Ejecuta un paso de entrenamiento distribuido.
         Espera a que los workers estén listos, envía los pesos actuales,
-        luego envía el mensaje de step y recopila los resultados.
+        luego envía el mensaje de step y recopila los resultados y promedia los pesos.
         """
         n_workers = self._wait_workers()
 
@@ -265,19 +261,17 @@ class CIFAR10Server(DDPServer):
 
         eval_loss, eval_accuracy = self.evaluate()
         elapsed = time.perf_counter() - t0
-        gnorm = 0
 
         self.metrics.loc[self.current_epoch] = [
             loss,
             accuracy,
             eval_loss,
             eval_accuracy,
-            gnorm,
             elapsed,
         ]
 
         log.info(
-            f"Epoch {self.current_epoch + 1}/{self.epochs} - loss: {loss:.4f} - accuracy: {accuracy:.4f} - eval_loss: {eval_loss:.4f} - eval_accuracy: {eval_accuracy:.4f} - gnorm: {gnorm:.4f} - elapsed: {format_elapse(elapsed)}"
+            f"Epoch {self.current_epoch + 1}/{self.epochs} - loss: {loss:.4f} - accuracy: {accuracy:.4f} - eval_loss: {eval_loss:.4f} - eval_accuracy: {eval_accuracy:.4f} - elapsed: {format_elapse(elapsed)}"
         )
 
         self.current_epoch += 1

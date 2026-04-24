@@ -1,4 +1,6 @@
+import torch
 import torch.nn as nn
+from torchinfo import summary
 
 
 class Cifar10Model(nn.Module):
@@ -43,3 +45,15 @@ class Cifar10Model(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+
+def cifar10_get_model(gray=True, conv=False, lr=0.001, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = Cifar10Model(gray=gray, conv=conv).to(device)
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    summary(model, input_size=(1, 1 if gray else 3, 32, 32))
+
+    return model, criterion, optimizer

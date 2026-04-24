@@ -1,17 +1,15 @@
 import os
 import time
-from this import s
 
 import numpy as np
 import pandas as pd
 import torch
-from torchinfo import summary
 
 from ddp import DDPClient
 from ddp.pickle_utils import log, send_msg
 
 from .load_data import preload_cifar10_to_ram
-from .model import Cifar10Model
+from .model import cifar10_get_model
 
 
 class CIFAR10Worker(DDPClient):
@@ -97,10 +95,9 @@ class CIFAR10Worker(DDPClient):
             lr = payload["lr"]
             self.batch_size = payload["batch_size"]
 
-            self.model = Cifar10Model(gray=gray, conv=conv).to(self.device)
-            self.criterion = torch.nn.CrossEntropyLoss()
-            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=lr)
-            summary(self.model, input_size=(1, 1 if gray else 3, 32, 32))
+            self.model, self.criterion, self.optimizer = cifar10_get_model(
+                gray=gray, conv=conv, lr=lr, device=self.device
+            )
 
             self.dataset = preload_cifar10_to_ram(
                 train=True,

@@ -55,7 +55,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=9090)
     parser.add_argument("--rgb", action="store_true")
     parser.add_argument("--normalize", action="store_true")
-    parser.add_argument("--lr", type=float, default=0.01)
+    parser.add_argument("--lr", type=float, default=0.001)
 
     parser.add_argument("--conv", action="store_true")
     parser.add_argument("--epochs", type=int, default=20)
