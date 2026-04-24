@@ -203,7 +203,7 @@ class CIFAR10Server(DDPServer):
             delta_i = payloads[i]["delta"]
 
             for k, d in delta_i.items():
-                d = torch.as_tensor(d)
+                d = torch.as_tensor(d, device=self.device)
 
                 if k not in accum_delta:
                     accum_delta[k] = weight * d
