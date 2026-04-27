@@ -80,9 +80,21 @@ def plot_grid(
     labels: List[str | List[str] | tuple],  # titulo o (titulo, label1, label2, ...)
     n_cols: int | None = None,
     save_path: str | None = None,
+    ax_as_int: bool = True,
 ):
     """
     Graficar varias métricas en una cuadrícula.
+
+    Args:
+        history (List[Union[List[float], tuple]]): Lista de listas o tuplas con los valores de las métricas.
+            [(val1, val2), () ...] valores en una misma gráfica
+
+        labels (List[str | List[str] | tuple]): Lista de etiquetas para las métricas.
+            [(titulo, label1, label2, ...), ...] titulo del plot y legend de cada linea
+
+        n_cols (int | None, optional): Número de columnas en la cuadrícula. Defaults to None.
+        save_path (str | None, optional): Ruta para guardar la figura. Defaults to None.
+        ax_as_int (bool, optional): Si True, el eje x solo muestra valores enteros. Defaults to True.
     """
     if not history:
         return
@@ -123,6 +135,11 @@ def plot_grid(
         axs[idx].set_visible(False)
 
     plt.tight_layout()
+
+    # eje x solo entero
+    if ax_as_int:
+        for ax in axs:
+            ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
 
     if save_path:
         plt.savefig(f"{save_path}/grid.png")
