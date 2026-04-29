@@ -30,7 +30,9 @@ class TinyImangeNetWorker(DDPClient):
         self.scheduler: Optional[torch.optim.lr_scheduler.CosineAnnealingLR] = None
 
         self.dataset: Optional[TinyImageNetLazy] = None
+        self.eval_dataset: Optional[TinyImageNetLazy] = None
         self.sampler: Optional[ShardSampler] = None
+        self.eval_sampler: Optional[ShardSampler] = None
         self.ready = False
 
         self.rank: Optional[int] = None
@@ -75,9 +77,8 @@ class TinyImangeNetWorker(DDPClient):
             )
 
             self.dataset = TinyImageNetLazy()
+            self.eval_dataset = TinyImageNetLazy(split="valid")
             self.ready = True
-
-            log.info(f"Modelo listo. lr={lr}, batch_size={self.batch_size}")
 
         @self.on("assign")
         def on_assign(msg):
@@ -92,6 +93,13 @@ class TinyImangeNetWorker(DDPClient):
 
                 self.sampler = ShardSampler(
                     dataset_size=len(self.dataset),
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    batch_size=self.batch_size,
+                )
+
+                self.eval_sampler = ShardSampler(
+                    dataset_size=len(self.eval_dataset),
                     rank=self.rank,
                     world_size=self.world_size,
                     batch_size=self.batch_size,
@@ -115,17 +123,35 @@ class TinyImangeNetWorker(DDPClient):
                 log.warning("Ignorando paso: modelo no asignado")
                 return
 
-            t0 = time.perf_counter()
-
             epoch = msg["epoch"]
             w_global = {k: v.clone() for k, v in self.model.state_dict().items()}
 
-            total_loss, total_correct, total_samples = 0.0, 0, 0
-            n_batches = 0
+            # test dataset
+            self.model.eval()
+            eval_loss, eval_correct, eval_total = 0.0, 0, 0
+            eval_loader = self.eval_sampler.get_loader(epoch, self.eval_dataset)
 
+            with torch.no_grad():
+                for X, y in eval_loader:
+                    X, y = X.to(self.device), y.to(self.device)
+                    outputs = self.model(X)
+                    loss = self.criterion(outputs, y)
+                    eval_loss += loss.item() * y.size(0)
+                    eval_correct += (outputs.argmax(1) == y).sum().item()
+                    eval_total += y.size(0)
+
+                    print(
+                        f"Eval loss: {loss.item():.4f}, correct: {eval_correct}/{eval_total}",
+                        end="\r",
+                    )
+
+            # Train
+            t0 = time.perf_counter()
+            self.model.train()
             loader = self.sampler.get_loader(epoch, self.dataset)
 
-            self.model.train()
+            total_loss, total_correct, total_samples = 0.0, 0, 0
+            n_batches = 0
 
             for X, y in loader:
                 t_init = time.perf_counter()
@@ -188,6 +214,10 @@ class TinyImangeNetWorker(DDPClient):
                         "samples": total_samples,
                         "loss": avg_loss,
                         "accuracy": avg_acc,
+                        # eval distribuido
+                        "eval_loss": eval_loss,  # suma, no promedio
+                        "eval_correct": eval_correct,
+                        "eval_total": eval_total,
                     },
                 },
             )
