@@ -30,3 +30,17 @@ python -m cifar10.train --epoch 10 --conv --normalize --rgb --save "results"
 # worker
 python -m cifar10.train --worker --host localhost --save "results"
 ```
+
+## Tiny Imagenet (200 clases)
+```bash
+# servidor
+python -m tiny_imagenet.train --epoch 10 --save "results"
+
+# worker
+python -m tiny_imagenet.train --worker --host localhost --save "results"
+```
+
+### Parámetros para el servidor
+- --lr 
+- --batch-size
+- --min-workers

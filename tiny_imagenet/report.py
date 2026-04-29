@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import pandas as pd
 import torch
@@ -216,3 +217,6 @@ def excel_report(per_class_acc, conf, loader, save_path):
 
     df = save_class_report(per_class_acc, conf, label_names, save_path)
     export_to_excel(df, save_path, img_dir)
+
+    # remove img
+    shutil.rmtree(img_dir, ignore_errors=True)
