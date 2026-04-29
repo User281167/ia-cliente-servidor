@@ -205,12 +205,12 @@ tiny_imagenet_classes = [
 
 
 def load_tiny_imagenet_classes() -> Dict[str, str]:
-    path = __file__.replace("classes.py", "wnids.txt")
+    path = __file__.replace("wnids.py", "wnids.txt")
     classes = {}
 
     with open(path) as f:
         for line in f:
-            wnid, name = line.strip().split("\t")
+            wnid, name = line.strip().split("|")
             classes[wnid] = name
 
     return classes
