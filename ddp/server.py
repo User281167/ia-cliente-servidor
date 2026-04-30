@@ -311,7 +311,7 @@ class DDPServer(ABC):
         """Indica a todos los workers que ejecuten su paso (sin pool, secuencial)."""
         self._broadcast_fast(DDPMessage.step(epoch))
 
-    def _collect_results(self):
+    def _collect(self, message: str):
         """
         Recolecta resultados de los workers (sin pool, secuencial)
         Espera worker timeout por cada worker y devuelve los resultados recolectados.
@@ -353,7 +353,7 @@ class DDPServer(ABC):
                 try:
                     # solo esperamos mensajes de tipo "result"
                     msg = recv_ddp(sock)
-                    DDPMessage.expect(msg, MSG_RESULT)
+                    DDPMessage.expect(msg, message)
                     results.append(msg)
                 except Exception as e:
                     log.warning(f"Worker {wid} falló: {e}")
@@ -364,6 +364,15 @@ class DDPServer(ABC):
 
         self._remove_dead(dead)
         return results
+
+    def _collect_results(self):
+        """
+        Recolecta resultados de los workers (sin pool, secuencial)
+        Espera worker timeout por cada worker y devuelve los resultados recolectados.
+        No asegura ni espera que todos los workers hayan terminado,
+        solo los que no hayan fallado o superado el timeout.
+        """
+        return self._collect(MSG_RESULT)
 
     def _remove_dead(self, wids: list) -> None:
         """Remueve y los cierra workers muertos que nunca respondieron o fueron desconectados."""

@@ -1,5 +1,6 @@
 import os
 import time
+from pydoc import describe
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,7 @@ class CIFAR10Server(DDPServer):
         lr: float = 0.001,
         batch_size: int = 128,
         min_workers: int = 1,
+        save_path: str | None = None,
     ):
         config = {
             "gray": gray,
@@ -46,6 +48,8 @@ class CIFAR10Server(DDPServer):
         self.conv = conv
         self.lr = lr
         self.batch_size = batch_size
+        self.save_path = save_path
+        self.current_workers = 0
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -62,6 +66,8 @@ class CIFAR10Server(DDPServer):
 
         self.metrics = pd.DataFrame(
             columns=[
+                "workers",
+                "worker_res",
                 "loss",
                 "accuracy",
                 "eval_loss",
@@ -72,8 +78,9 @@ class CIFAR10Server(DDPServer):
 
         self.WORKER_TIMEOUT = 60 * (5 if conv else 1)
 
-    def results(self, save_path: str | None):
+    def results(self):
         """Guarda las métricas en un archivo Excel y genera gráfico de resultados."""
+        save_path = self.save_path
 
         if save_path:
             os.makedirs(save_path, exist_ok=True)
@@ -169,6 +176,7 @@ class CIFAR10Server(DDPServer):
         """
         with self._workers_lock:
             items = list(self._workers.items())
+            self.current_workers = len(items)
 
         for i, (wid, sock) in enumerate(items):
             msg = DDPMessage.assign(
@@ -263,6 +271,8 @@ class CIFAR10Server(DDPServer):
         elapsed = time.perf_counter() - t0
 
         self.metrics.loc[self.current_epoch] = [
+            self.current_workers,
+            len(results),
             loss,
             accuracy,
             eval_loss,
@@ -283,10 +293,38 @@ class CIFAR10Server(DDPServer):
             self.step()
 
     def run(self, host: str = "0.0.0.0", port: int = 9999):
-        """Inicia el servidor y entrena el modelo."""
+        """
+        Inicia el servidor y entrena el modelo.
+
+        Finalizar pedir métricas y guardarlas en Excel.
+        """
         self.start_server(host=host, port=port)
 
         try:
             self.train()
+        except KeyboardInterrupt:
+            log.info("Entrenamiento interrumpido por el usuario")
         finally:
+            if self.save_path:
+                os.makedirs(self.save_path, exist_ok=True)
+
+                self._broadcast_fast({"type": "metrics"})
+                results = self._collect("metrics")
+
+                for result in results:
+                    payload = result["payload"]
+                    df = pd.DataFrame(payload["data_frame"])
+                    rank = payload["rank"]
+                    description = df.describe()
+
+                    df.to_excel(os.path.join(self.save_path, f"metrics_{rank}.xlsx"))
+
+                    description = self.metrics.describe(percentiles=[0.1, 0.5, 0.9])
+                    description.to_excel(
+                        os.path.join(self.save_path, f"description_{rank}.xlsx"),
+                        index=True,
+                    )
+
+                self.results()
+
             self.stop_server()

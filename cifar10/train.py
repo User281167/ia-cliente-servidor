@@ -24,6 +24,7 @@ def run_server(
         lr=lr,
         batch_size=batch_size,
         min_workers=min_workers,
+        save_path=save_path,
     )
 
     try:
@@ -32,7 +33,7 @@ def run_server(
         print(f"Error al iniciar el servidor: {e}")
     finally:
         server.stop_server()
-        server.results(save_path=save_path)
+        server.results()
 
 
 def run_client(host, port, save_path=None):
