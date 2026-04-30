@@ -26,6 +26,7 @@ class CIFAR10Worker(DDPClient):
         self.criterion = None
         self.optimizer = None
         self.dataset = None
+        self.test_dataset = None
 
         self.rank = 0
         self.world_size = 1
@@ -49,13 +50,13 @@ class CIFAR10Worker(DDPClient):
             os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=True
         )
 
-    def get_shard(self, epoch):
+    def get_shard(self, epoch, test=False):
         """
         Obtiene un lote de datos para la época dada.
         Realizar shuffle global y shard (toma de datos) local.
         Evita que los datos sean siempre los mismos en cada época y que se solapen entre workers.
         """
-        N = len(self.dataset)
+        N = len(self.test_dataset) if test else len(self.dataset)
 
         rng = np.random.default_rng(seed=epoch)
 
@@ -66,11 +67,11 @@ class CIFAR10Worker(DDPClient):
 
         return shard
 
-    def get_batch(self, epoch):
+    def get_batch(self, epoch, test=False):
         """
         Minibatches para no entrenar con todo el conjunto y explotar la memoria.
         """
-        shard = self.get_shard(epoch)
+        shard = self.get_shard(epoch, test=test)
         # evitar el batch incompleto
         n = (len(shard) // self.batch_size) * self.batch_size
         shard = shard[:n]
@@ -101,6 +102,12 @@ class CIFAR10Worker(DDPClient):
 
             self.dataset = preload_cifar10_to_ram(
                 train=True,
+                gray=gray,
+                normalize=normalize,
+            )
+
+            self.test_dataset = preload_cifar10_to_ram(
+                train=False,
                 gray=gray,
                 normalize=normalize,
             )
@@ -145,6 +152,25 @@ class CIFAR10Worker(DDPClient):
 
             epoch = msg["epoch"]
             w_global = {k: v.clone() for k, v in self.model.state_dict().items()}
+
+            # test dataset
+            self.model.eval()
+            eval_loss, eval_correct, eval_total = 0.0, 0, 0
+
+            with torch.no_grad():
+                for batch_idx in self.get_batch(epoch, test=True):
+                    X, y = self.test_dataset[batch_idx]
+                    X, y = X.to(self.device), y.to(self.device)
+                    outputs = self.model(X)
+                    loss = self.criterion(outputs, y)
+                    eval_loss += loss.item() * y.size(0)
+                    eval_correct += (outputs.argmax(1) == y).sum().item()
+                    eval_total += y.size(0)
+
+                    print(
+                        f"Eval loss: {loss.item():.4f}, correct: {eval_correct}/{eval_total}",
+                        end="\r",
+                    )
 
             total_loss, total_correct, total_samples = 0.0, 0, 0
             steps_done = 0
@@ -207,6 +233,10 @@ class CIFAR10Worker(DDPClient):
                         "samples": total_samples,
                         "loss": avg_loss,
                         "accuracy": avg_acc,
+                        # test
+                        "eval_loss": eval_loss,  # suma, no promedio
+                        "eval_correct": eval_correct,
+                        "eval_total": eval_total,
                     },
                 },
             )

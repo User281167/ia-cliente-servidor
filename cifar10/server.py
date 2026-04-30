@@ -1,6 +1,5 @@
 import os
 import time
-from pydoc import describe
 
 import numpy as np
 import pandas as pd
@@ -195,20 +194,21 @@ class CIFAR10Server(DDPServer):
 
     def _aggregate(self, results):
         """
-        Promedia los pesos de los workers.
+        Promedio ponderado de los pesos de los workers.
 
         FedAvg:
-            w_new = w_global + Σ (n_i/N)
+            w_new = w_global + η * Σ (n_i/N)
+
+        results = [{delta, samples}]
         """
-        payloads = [r["payload"] for r in results]
-        N_total = sum(r["samples"] for r in payloads)
+        N_total = sum(r["samples"] for r in results)
 
         accum_delta = {}
 
-        for i, msg in enumerate(results):
-            n_i = payloads[i]["samples"]
+        for i in range(len(results)):
+            n_i = results[i]["samples"]
             weight = n_i / N_total
-            delta_i = payloads[i]["delta"]
+            delta_i = results[i]["delta"]
 
             for k, d in delta_i.items():
                 d = torch.as_tensor(d, device=self.device)
@@ -225,6 +225,21 @@ class CIFAR10Server(DDPServer):
             state[k] = state[k] + accum_delta[k]
 
         self.model.load_state_dict(state)
+
+    def _aggregate_metrics(self, results):
+        """
+        Agrega las métricas de los resultados de test de los workers.
+        """
+        N = sum(r["samples"] for r in results)
+        loss = sum(r["loss"] * r["samples"] for r in results) / N
+        accuracy = sum(r["accuracy"] * r["samples"] for r in results) / N
+
+        # eval distribuido — sumar counts crudos, no promediar promedios
+        eval_total = sum(r["eval_total"] for r in results)
+        eval_loss = sum(r["eval_loss"] for r in results) / eval_total
+        eval_accuracy = sum(r["eval_correct"] for r in results) / eval_total
+
+        return loss, accuracy, eval_loss, eval_accuracy
 
     def step(self):
         """
@@ -255,19 +270,12 @@ class CIFAR10Server(DDPServer):
             log.warning("No se recibieron resultados, saltando época")
             return
 
+        # result {type, payload} obtner solo el payload
+        results = [r["payload"] for r in results]
         self._aggregate(results)
 
         # métricas
-        loss = sum(r["payload"]["loss"] * r["payload"]["samples"] for r in results)
-        accuracy = sum(
-            r["payload"]["accuracy"] * r["payload"]["samples"] for r in results
-        )
-
-        N = sum(r["payload"]["samples"] for r in results)
-        loss /= N
-        accuracy /= N
-
-        eval_loss, eval_accuracy = self.evaluate()
+        loss, accuracy, eval_loss, eval_accuracy = self._aggregate_metrics(results)
         elapsed = time.perf_counter() - t0
 
         self.metrics.loc[self.current_epoch] = [
