@@ -163,7 +163,7 @@ six==1.17.0
     # via python-dateutil
 sympy==1.13.1
     # via torch
-torch==2.5.1+cu121
+torch==2.5.1
     # via
     #   server-param (pyproject.toml)
     #   torchmetrics
@@ -174,7 +174,7 @@ torchmetrics==1.9.0
     # via server-param (pyproject.toml)
 torchsummary==1.5.1
     # via server-param (pyproject.toml)
-torchvision==0.20.1+cu121
+torchvision==0.20.1
     # via server-param (pyproject.toml)
 tqdm==4.67.3
     # via
