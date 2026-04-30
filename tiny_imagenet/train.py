@@ -12,12 +12,15 @@ def run_server(
     host: str = "0.0.0.0",
     port: int = 9090,
     save_path: str | None = None,
+    worker_timeout: int = 60 * 5,
 ):
     server = TinyImageNetServer(
         epochs=epochs,
         lr=lr,
         batch_size=batch_size,
         min_workers=min_workers,
+        save_path=save_path,
+        worker_timeout=worker_timeout,
     )
 
     try:
@@ -26,7 +29,7 @@ def run_server(
         print(f"Error al iniciar el servidor: {e}")
     finally:
         server.stop_server()
-        server.results(save_path=save_path)
+        server.results()
 
 
 def run_client(host, port, save_path=None):
@@ -60,6 +63,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=128)
 
     parser.add_argument("--save", type=str, default=None, help="Folder to save metrics")
+    parser.add_argument(
+        "--worker-timeout", type=int, default=60 * 5, help="Worker timeout in seconds"
+    )
 
     args = parser.parse_args()
 
@@ -76,4 +82,5 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             min_workers=args.min_workers,
             save_path=args.save,
+            worker_timeout=args.worker_timeout,
         )

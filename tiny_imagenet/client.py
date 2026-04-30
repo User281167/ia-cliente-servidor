@@ -114,6 +114,22 @@ class TinyImangeNetWorker(DDPClient):
             state_dict = {k: torch.tensor(v) for k, v in state.items()}
             self.model.load_state_dict(state_dict)
 
+        @self.on("metrics")
+        def on_metrics(msg):
+            """
+            Enviar métricas al servidor
+            """
+            send_msg(
+                self._sock,
+                {
+                    "type": "metrics",
+                    "payload": {
+                        "data_frame": self.metrics,
+                        "rank": self.rank,
+                    },
+                },
+            )
+
         @self.on("step")
         def on_step(msg):
             """
