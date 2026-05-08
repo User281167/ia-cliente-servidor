@@ -72,6 +72,9 @@ class DDPServer(ABC):
         self._workers: dict[int, socket.socket] = {}
         self._workers_lock = threading.Lock()
 
+        self._registered_workers: list[tuple[int, socket.socket]] = []
+        self._registered_workers_lock = threading.Lock()
+
         # worker_id -> metadatos asignados (seed, start, n_batches)
         self._assignments: dict[int, dict] = {}
 
@@ -242,31 +245,46 @@ class DDPServer(ABC):
             log.warning(f"Error en handshake con {addr}: {e}")
             conn.close()
 
-    def _wait_workers(self) -> int | None:
-        """Espera a que se conecten min_workers workers y devuelve el número actual."""
+    def _get_registered_workers(self) -> list[tuple[int, socket.socket]]:
+        """Devuelve una lista inmutable de worker_ids registrados."""
+        with self._registered_workers_lock:
+            return self._registered_workers.copy()
+
+    def _wait_and_register_workers(self) -> int:
+        """
+        Espera min_workers y devuelve un snapshot inmutable de worker_ids para esta iteración.
+        Workers que se conecten DESPUÉS de esta llamada quedan fuera del snapshot
+        y nunca llegarán al selector de _collect.
+
+        Evita esperar por workers a los cuales nunca se le enviaron mensajes.
+        """
+        with self._registered_workers_lock:
+            self._registered_workers.clear()
 
         with self._workers_lock:
-            n = len(self._workers)
+            current = list(self._workers.items())
 
-        if n == 0:
-            log.warning("No hay workers activos, esperando reconexion...")
+        if not current:
+            log.warning("No hay workers activos, esperando reconexión...")
 
             if not self._ready_event.wait(timeout=self.CONNECT_TIMEOUT):
                 log.warning("Timeout esperando workers (saltar época)")
-                return None
+                return 0
 
             with self._workers_lock:
-                n = len(self._workers)
+                current = list(self._workers.items())
 
-        return n
+        with self._registered_workers_lock:
+            self._registered_workers = current
+
+        return len(current)
 
     # Comunicación
     def _broadcast_fast(self, msg):
         """Envía un mensaje a todos los workers registrados (sin pool, secuencial)."""
 
         # No usa pool
-        with self._workers_lock:
-            workers = list(self._workers.items())
+        workers = self._get_registered_workers()
 
         raw = pickle_code(msg)
 
@@ -279,8 +297,7 @@ class DDPServer(ABC):
     def _broadcast_pool(self, msg):
         """Envía un mensaje a todos los workers registrados usando un pool de hilos."""
 
-        with self._workers_lock:
-            workers = list(self._workers.items())
+        workers = self._get_registered_workers()
 
         if not workers:
             return
@@ -321,9 +338,7 @@ class DDPServer(ABC):
         # selector de sockets
         # permite seleccionar múltiples sockets simultáneamente
         sel = selectors.DefaultSelector()
-
-        with self._workers_lock:
-            items = list(self._workers.items())
+        items = self._get_registered_workers()
 
         results = []
         dead = []
@@ -363,6 +378,10 @@ class DDPServer(ABC):
             dead.append(key.data)
 
         self._remove_dead(dead)
+
+        with self._registered_workers_lock:
+            self._registered_workers.clear()
+
         return results
 
     def _collect_results(self):

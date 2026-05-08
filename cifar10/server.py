@@ -173,9 +173,7 @@ class CIFAR10Server(DDPServer):
         Envía el mensaje de asignación a todos los workers.
         Cada worker recibe un mensaje con su ID, rank, world_size y epoch antes de comenzar el entrenamiento.
         """
-        with self._workers_lock:
-            items = list(self._workers.items())
-            self.current_workers = len(items)
+        items = self._get_registered_workers()
 
         for i, (wid, sock) in enumerate(items):
             msg = DDPMessage.assign(
@@ -247,12 +245,13 @@ class CIFAR10Server(DDPServer):
         Espera a que los workers estén listos, envía los pesos actuales,
         luego envía el mensaje de step y recopila los resultados y promedia los pesos.
         """
-        n_workers = self._wait_workers()
+        n_workers = self._wait_and_register_workers()
 
-        if n_workers is None:
+        if n_workers < self.min_workers:
             log.warning("Timeout esperando workers (saltar época)")
             return
 
+        self.current_workers = n_workers
         t0 = time.perf_counter()
 
         # pesos y parámetros del modelo en pytorch
