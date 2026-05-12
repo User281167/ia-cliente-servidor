@@ -5,11 +5,10 @@ import numpy as np
 import pandas as pd
 import torch
 
+from cifar10.load_data import preload_cifar10_to_ram
+from cifar10.model import cifar10_get_model
 from ddp import DDPClient
 from ddp.pickle_utils import log, send_msg
-
-from .load_data import preload_cifar10_to_ram
-from .model import cifar10_get_model
 
 
 class CIFAR10Worker(DDPClient):
