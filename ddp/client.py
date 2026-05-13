@@ -5,34 +5,10 @@ import time
 from abc import ABC
 from typing import Optional
 
+from .handler_register import HandlerRegistry
 from .logger import log
 from .message import MSG_ASSIGN, MSG_DONE, DDPMessage, recv_ddp
 from .pickle_utils import recv_msg, send_msg
-
-
-class HandlerRegistry:
-    """
-    Registro de handlers para mensajes del cliente DDP.
-    Permite asociar funciones a tipos de mensajes específicos.
-
-    ej:
-        @registry.on(MSG_ASSIGN)
-        def handle_assign(msg):
-            print(msg)
-    """
-
-    def __init__(self):
-        self._handlers = {}
-
-    def on(self, msg_type):
-        def decorator(fn):
-            self._handlers[msg_type] = fn
-            return fn
-
-        return decorator
-
-    def get(self, msg_type):
-        return self._handlers.get(msg_type)
 
 
 class DDPClient(ABC):
@@ -160,9 +136,9 @@ class DDPClient(ABC):
                 else:
                     log.warning(f"Mensaje desconocido: {mtype}")
             except ValueError as e:
-                log.warning(f"Mensaje inválido: {e}")
+                log.error(f"Mensaje inválido: {e}")
             except (ConnectionError, OSError) as e:
-                log.warning(f"Conexión perdida: {e}")
+                log.error(f"Conexión perdida: {e}")
                 self._reconnect()
 
     def run(self):

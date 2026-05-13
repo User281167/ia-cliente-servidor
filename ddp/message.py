@@ -89,3 +89,7 @@ class DDPMessage:
             raise ValueError("Missing type")
 
         return msg
+
+    @staticmethod
+    def msg(type, **data):
+        return {"type": type, "payload": data}

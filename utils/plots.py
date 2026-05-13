@@ -81,6 +81,7 @@ def plot_grid(
     n_cols: int | None = None,
     save_path: str | None = None,
     ax_as_int: bool = True,
+    x_label: str = "Epoch",
 ):
     """
     Graficar varias métricas en una cuadrícula.
@@ -120,7 +121,7 @@ def plot_grid(
 
         ax.plot(range(1, n_epochs + 1), col_values)
         ax.set_title(title)
-        ax.set_xlabel("Epoch")
+        ax.set_xlabel(x_label)
         ax.set_ylabel(title)
         ax.grid(True)
 

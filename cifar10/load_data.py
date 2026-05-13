@@ -17,6 +17,10 @@ cifar10_classes = (
 )
 
 
+def cifar10_data_len(train=True):
+    return 50000 if train else 10000
+
+
 def preload_cifar10_to_ram(train=True, gray=False, normalize=True):
     """Cargar  CIFAR-10 en RAM como un TensorDataset."""
     transform_list = []
