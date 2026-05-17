@@ -25,10 +25,10 @@ Servidor de parametros y worker
 
 ```bash
 # servidor
-python -m cifar10.weigths.train --epoch 10 --conv --normalize --rgb --save "results"
+python -m cifar10.weights.train --epochs 10 --conv --normalize --rgb --save "results"
 
 # worker
-python -m cifar10.weigths.train --worker --host localhost --save "results"
+python -m cifar10.weights.train --worker --host localhost --save "results"
 ```
 
 ## Tiny Imagenet (200 clases)
@@ -44,3 +44,13 @@ python -m tiny_imagenet.train --worker --host localhost --save "results"
 - --lr 
 - --batch-size
 - --min-workers
+
+## CIFAR-10 Distributed Data Parallel asíncrono con delta de pesos
+
+```bash
+# servidor
+python -m cifar10.async_weights.train --epochs 10 --conv --normalize --rgb --save "results"
+
+# worker
+python -m cifar10.async_weights.train --worker --host localhost --save "results"
+```
