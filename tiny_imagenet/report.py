@@ -165,7 +165,7 @@ def export_to_excel(df, save_path, img_dir):
         ws.row_dimensions[excel_row].height = 50  # ~64px visual
 
         # -------- imagen principal --------
-        img_path = os.path.join(img_dir, row["img"])
+        img_path = os.path.join(img_dir, str(row["img"]))
         if os.path.exists(img_path):
             img = XLImage(img_path)
             img.width = 64
@@ -174,7 +174,7 @@ def export_to_excel(df, save_path, img_dir):
 
         # -------- imagen confundida --------
         if row["img_confused"] is not None:
-            img_conf_path = os.path.join(img_dir, row["img_confused"])
+            img_conf_path = os.path.join(img_dir, str(row["img_confused"]))
 
             if os.path.exists(img_conf_path):
                 img2 = XLImage(img_conf_path)

@@ -79,8 +79,6 @@ class ShardSampler:
     def get_loader(self, epoch: int, dataset: Dataset):
         # Obtener todos los índices del shard de una vez
         shard = self.get_shard_indices(epoch)
-        n = (len(shard) // self.batch_size) * self.batch_size
-        shard = shard[:n]
 
         # Un solo loader para toda la época
         subset = Subset(dataset, shard.tolist())

@@ -62,6 +62,15 @@ class TinyImageNetModel(nn.Module):
         x = self.classifier(x)
         return x
 
+    def save(self, path):
+        torch.save(self.state_dict(), path)
+
+    def load(self, path, device=None):
+        self.load_state_dict(torch.load(path, weights_only=True))
+
+        if device is not None:
+            self.to(device)
+
 
 def get_tiny_imagenet_model(lr=0.001, epochs=20, device=None):
     """

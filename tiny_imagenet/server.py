@@ -4,7 +4,6 @@ import time
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader, Subset
 from torchmetrics.classification import MulticlassConfusionMatrix
 
 from ddp import DDPServer
@@ -52,6 +51,9 @@ class TinyImageNetServer(DDPServer):
             lr=lr, epochs=epochs, device=self.device
         )
 
+        if save_path and os.path.exists(os.path.join(save_path, "model.pth")):
+            self.model.load(os.path.join(save_path, "model.pth"), device=self.device)
+
         self.epochs = epochs
         self.current_epoch = 0
         self.loader = None
@@ -82,21 +84,7 @@ class TinyImageNetServer(DDPServer):
             batch_size=self.batch_size,
         )
 
-        # Obtener todos los índices del shard de una vez, cargar todo los datos
-        shard = sampler.get_shard_indices(0)
-        n = (len(shard) // self.batch_size) * self.batch_size
-        shard = shard[:n]
-
-        # Un solo loader para cada época
-        subset = Subset(train_dataset, shard.tolist())
-        self.loader = DataLoader(
-            subset,
-            batch_size=self.batch_size,
-            num_workers=2,
-            persistent_workers=True,
-            prefetch_factor=2,
-            pin_memory=False,
-        )
+        self.loader = sampler.get_loader(0, train_dataset)
 
     def results(self):
         """Guarda las métricas en un archivo Excel y genera gráfico de resultados."""
@@ -353,5 +341,6 @@ class TinyImageNetServer(DDPServer):
                     )
 
                 self.results()
+                self.model.save(os.path.join(self.save_path, "model.pth"))
 
             self.stop_server()
