@@ -39,8 +39,13 @@ class DDPMessage:
         return {"type": MSG_WEIGHTS, "payload": state}
 
     @staticmethod
-    def step(epoch):
-        return {"type": MSG_STEP, "epoch": epoch}
+    def step(epoch, seed=None):
+        msg = {"type": MSG_STEP, "epoch": epoch}
+
+        if seed is not None:
+            msg["seed"] = seed
+
+        return msg
 
     @staticmethod
     def result(grads, loss, n):

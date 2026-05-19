@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import threading
 from dataclasses import dataclass
 
@@ -7,6 +8,7 @@ from dataclasses import dataclass
 @dataclass
 class ShardAssignment:
     epoch: int
+    seed: int
     shard_idx: int  # índice lógico dentro de la época
     start: int  # offset en el dataset
     length: int  # cuántos samples
@@ -32,6 +34,7 @@ class ShardScheduler:
         self.batch_size = batch_size
         self.max_batches = data_len // batch_size
         self.max_shards = data_len // shard_size
+        self.seed = secrets.randbits(32)
 
         self._lock = threading.Lock()
         self.current_epoch: int = 0
@@ -53,6 +56,7 @@ class ShardScheduler:
                 self.current_epoch += 1
                 self._pending = list(range(self.max_shards))
                 self._in_flight.clear()  # nueva época asignaciones anteriores caducan
+                self.seed = secrets.randbits(32)
 
             shard_idx = self._pending.pop(0)
 
@@ -70,6 +74,7 @@ class ShardScheduler:
 
             return ShardAssignment(
                 epoch=self.current_epoch,
+                seed=self.seed,
                 shard_idx=shard_idx,
                 start=start,
                 length=length,

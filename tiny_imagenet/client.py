@@ -57,6 +57,77 @@ class TinyImangeNetWorker(DDPClient):
             os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=True
         )
 
+    def test(self, seed):
+        # test dataset
+        self.model.eval()
+        eval_loss, eval_correct, eval_total = 0.0, 0, 0
+        eval_loader = self.eval_sampler.get_loader(seed, self.eval_dataset)
+
+        with torch.no_grad():
+            for X, y in eval_loader:
+                X, y = X.to(self.device), y.to(self.device)
+                outputs = self.model(X)
+                loss = self.criterion(outputs, y)
+                eval_loss += loss.item() * y.size(0)
+                eval_correct += (outputs.argmax(1) == y).sum().item()
+                eval_total += y.size(0)
+
+                print(
+                    f"Eval loss: {loss.item():.4f}, correct: {eval_correct}/{eval_total}",
+                    end="\r",
+                )
+
+        return eval_loss, eval_correct, eval_total
+
+    def train(self, w_global, seed, t0):
+        self.model.train()
+        loader = self.sampler.get_loader(seed, self.dataset)
+
+        total_loss, total_correct, total_samples = 0.0, 0, 0
+        n_batches = 0
+
+        for X, y in loader:
+            t_init = time.perf_counter()
+            X, y = X.to(self.device), y.to(self.device)
+
+            self.optimizer.zero_grad()
+            outputs = self.model(X)
+            loss = self.criterion(outputs, y)
+            loss.backward()
+            self.optimizer.step()
+
+            _, preds = torch.max(outputs, 1)
+            total_loss += loss.item() * y.size(0)
+            total_correct += (preds == y).sum().item()
+            total_samples += y.size(0)
+            n_batches += 1
+
+            elapsed = time.perf_counter() - t_init
+
+            if n_batches % 10 == 0:
+                print(
+                    f"Batch {n_batches}, loss: {loss.item():.4f}, acc: {total_correct / total_samples:.4f}, elapsed: {format_elapse(elapsed)}",
+                    end="\r",
+                )
+
+        if self.scheduler is not None:
+            self.scheduler.step()
+
+        # Δw = w_local - w_global
+        w_local = self.model.state_dict()
+        delta = {
+            k: (w_local[k] - w_global[k]).cpu().numpy().astype(np.float16)
+            for k in w_global
+        }
+
+        avg_acc = total_correct / total_samples
+        avg_loss = total_loss / total_samples
+
+        elapse = time.perf_counter() - t0
+        throughput = total_samples / elapse
+
+        return delta, avg_acc, avg_loss, elapse, throughput, total_samples
+
     def _register_handlers(self):
         """
         Registra los manejadores de mensajes del servidor.
@@ -140,75 +211,16 @@ class TinyImangeNetWorker(DDPClient):
                 return
 
             epoch = msg["epoch"]
+            seed = msg.get("seed", epoch)
             w_global = {k: v.clone() for k, v in self.model.state_dict().items()}
 
-            # test dataset
-            self.model.eval()
-            eval_loss, eval_correct, eval_total = 0.0, 0, 0
-            eval_loader = self.eval_sampler.get_loader(epoch, self.eval_dataset)
-
-            with torch.no_grad():
-                for X, y in eval_loader:
-                    X, y = X.to(self.device), y.to(self.device)
-                    outputs = self.model(X)
-                    loss = self.criterion(outputs, y)
-                    eval_loss += loss.item() * y.size(0)
-                    eval_correct += (outputs.argmax(1) == y).sum().item()
-                    eval_total += y.size(0)
-
-                    print(
-                        f"Eval loss: {loss.item():.4f}, correct: {eval_correct}/{eval_total}",
-                        end="\r",
-                    )
+            eval_loss, eval_correct, eval_total = self.test(seed)
 
             # Train
             t0 = time.perf_counter()
-            self.model.train()
-            loader = self.sampler.get_loader(epoch, self.dataset)
-
-            total_loss, total_correct, total_samples = 0.0, 0, 0
-            n_batches = 0
-
-            for X, y in loader:
-                t_init = time.perf_counter()
-
-                X, y = X.to(self.device), y.to(self.device)
-
-                self.optimizer.zero_grad()
-                outputs = self.model(X)
-                loss = self.criterion(outputs, y)
-                loss.backward()
-                self.optimizer.step()
-
-                _, preds = torch.max(outputs, 1)
-                total_loss += loss.item() * y.size(0)
-                total_correct += (preds == y).sum().item()
-                total_samples += y.size(0)
-                n_batches += 1
-
-                elapsed = time.perf_counter() - t_init
-
-                if n_batches % 10 == 0:
-                    print(
-                        f"Batch {n_batches}, loss: {loss.item():.4f}, acc: {total_correct / total_samples:.4f}, elapsed: {format_elapse(elapsed)}",
-                        end="\r",
-                    )
-
-            if self.scheduler is not None:
-                self.scheduler.step()
-
-            # Δw = w_local - w_global
-            w_local = self.model.state_dict()
-            delta = {
-                k: (w_local[k] - w_global[k]).cpu().numpy().astype(np.float16)
-                for k in w_global
-            }
-
-            avg_acc = total_correct / total_samples
-            avg_loss = total_loss / total_samples
-
-            elapse = time.perf_counter() - t0
-            throughput = total_samples / elapse
+            delta, avg_acc, avg_loss, elapse, throughput, total_samples = self.train(
+                w_global, seed, t0
+            )
 
             log.info(
                 f"Worker {self.rank}: epoch={epoch}, acc={avg_acc:.4f}, loss={avg_loss:.4f}, elapse={elapse:.4f}, throughput={throughput:.4f}"

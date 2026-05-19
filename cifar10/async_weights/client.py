@@ -5,11 +5,11 @@ import numpy as np
 import pandas as pd
 import torch
 
-from cifar10.async_grads.shard_scheduler import ShardAssignment
 from cifar10.load_data import preload_cifar10_to_ram
 from cifar10.model import cifar10_get_model
 from ddp import DDPClient
 from ddp.pickle_utils import log, send_msg
+from ddp.shard_scheduler import ShardAssignment
 
 
 class CIFAR10Worker(DDPClient):
@@ -56,7 +56,7 @@ class CIFAR10Worker(DDPClient):
         N = len(self.test_dataset) if test else len(self.dataset)
 
         self.last_epoch = self.assignment.epoch
-        rng = np.random.default_rng(seed=self.assignment.epoch)
+        rng = np.random.default_rng(seed=self.assignment.seed)
         indices = rng.permutation(N)
 
         start = self.assignment.start

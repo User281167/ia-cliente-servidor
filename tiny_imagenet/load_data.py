@@ -50,7 +50,7 @@ class TinyImageNetLazy(Dataset):
 class ShardSampler:
     """
     Calcula qué índices le corresponden a un worker para una época dada.
-    Shuffle global por seed=epoch -> sin solapamiento entre workers.
+    Shuffle global por seed aleatorio del servidor -> sin solapamiento entre workers.
     Compatible con world_size variable (cada época puede tener distinto número de workers).
     """
 
@@ -60,8 +60,8 @@ class ShardSampler:
         self.world_size = world_size
         self.batch_size = batch_size
 
-    def get_shard_indices(self, epoch: int) -> np.ndarray:
-        rng = np.random.default_rng(seed=epoch)
+    def get_shard_indices(self, seed: int) -> np.ndarray:
+        rng = np.random.default_rng(seed=seed)
         indices = rng.permutation(self.dataset_size)
         shard = indices[self.rank :: self.world_size]
 
@@ -69,16 +69,16 @@ class ShardSampler:
         n = (len(shard) // self.batch_size) * self.batch_size
         return shard[:n]
 
-    def iter_batches(self, epoch: int):
+    def iter_batches(self, seed: int):
         """Genera listas de índices por minibatch."""
-        shard = self.get_shard_indices(epoch)
+        shard = self.get_shard_indices(seed)
 
         for i in range(0, len(shard), self.batch_size):
             yield shard[i : i + self.batch_size]
 
-    def get_loader(self, epoch: int, dataset: Dataset):
+    def get_loader(self, seed: int, dataset: Dataset):
         # Obtener todos los índices del shard de una vez
-        shard = self.get_shard_indices(epoch)
+        shard = self.get_shard_indices(seed)
 
         # Un solo loader para toda la época
         subset = Subset(dataset, shard.tolist())

@@ -24,6 +24,7 @@ import selectors
 import socket
 import threading
 import time
+import secrets
 from abc import ABC
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -326,7 +327,11 @@ class DDPServer(ABC):
 
     def _broadcast_step(self, epoch: int) -> None:
         """Indica a todos los workers que ejecuten su paso (sin pool, secuencial)."""
-        self._broadcast_fast(DDPMessage.step(epoch))
+        self._broadcast_fast(DDPMessage.step(epoch, seed=self._new_seed()))
+
+    def _new_seed(self) -> int:
+        """Genera una semilla aleatoria para el shuffle de un step o shard."""
+        return secrets.randbits(32)
 
     def _collect(self, message: str):
         """

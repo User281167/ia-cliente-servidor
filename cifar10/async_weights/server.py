@@ -7,13 +7,13 @@ import pandas as pd
 import torch
 from torchmetrics.classification import MulticlassConfusionMatrix
 
-from cifar10.async_grads.shard_scheduler import ShardScheduler
 from cifar10.load_data import cifar10_classes, cifar10_data_len, get_cifar10_dataloader
 from cifar10.model import cifar10_get_model
 from ddp import DDPAsyncServer
 from ddp.logger import log
 from ddp.message import DDPMessage
 from ddp.pickle_utils import send_msg
+from ddp.shard_scheduler import ShardScheduler
 from utils import plot_confusion_matrix, plot_grid, time_wrapper
 
 

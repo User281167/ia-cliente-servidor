@@ -49,14 +49,14 @@ class CIFAR10Worker(DDPClient):
             os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=True
         )
 
-    def get_shard(self, epoch, test=False):
+    def get_shard(self, seed, test=False):
         """
         Obtiene un lote de datos para la época dada.
         Realizar shuffle global y shard (toma de datos) local.
         Evita que los datos sean siempre los mismos en cada época y que se solapen entre workers.
         """
         N = len(self.test_dataset) if test else len(self.dataset)
-        rng = np.random.default_rng(seed=epoch)
+        rng = np.random.default_rng(seed=seed)
 
         # shuffle global
         # shard del worker
@@ -65,11 +65,11 @@ class CIFAR10Worker(DDPClient):
 
         return shard
 
-    def get_batch(self, epoch, test=False):
+    def get_batch(self, seed, test=False):
         """
         Minibatches para no entrenar con todo el conjunto y explotar la memoria.
         """
-        shard = self.get_shard(epoch, test)
+        shard = self.get_shard(seed, test)
         # evitar el batch incompleto
         n = (len(shard) // self.batch_size) * self.batch_size
         shard = shard[:n]
@@ -80,6 +80,67 @@ class CIFAR10Worker(DDPClient):
             X, y = self.test_dataset[indixes] if test else self.dataset[indixes]
             X, y = X.to(self.device), y.to(self.device)
             yield X, y
+
+    def test(self, seed):
+        # test dataset
+        self.model.eval()
+        eval_loss, eval_correct, eval_total = 0.0, 0, 0
+
+        with torch.no_grad():
+            for X, y in self.get_batch(seed, test=True):
+                outputs = self.model(X)
+                loss = self.criterion(outputs, y)
+
+                eval_loss += loss.item() * y.size(0)
+                eval_correct += (outputs.argmax(1) == y).sum().item()
+                eval_total += y.size(0)
+
+                print(
+                    f"Eval loss: {loss.item():.4f}, correct: {eval_correct}/{eval_total}",
+                    end="\r",
+                )
+
+        return eval_loss, eval_correct, eval_total
+
+    def train(self, seed, t0):
+        # train
+        self.model.train()
+        total_loss = torch.tensor(0.0)
+        total_correct = torch.tensor(0.0)
+        total_samples = torch.tensor(0.0)
+        n_batches = 0
+
+        for X, y in self.get_batch(seed):
+            self.optimizer.zero_grad()
+            outputs = self.model(X)
+            loss = self.criterion(outputs, y)
+            loss.backward()  # acumula gradientes crudos, sin dividir
+
+            total_loss += loss.item() * y.size(0)
+            _, preds = torch.max(outputs, 1)
+            total_correct += (preds == y).sum().item()
+            total_samples += y.size(0)
+            n_batches += 1
+
+            if n_batches % 10 == 0:
+                print(
+                    f"Batch {n_batches}, loss: {loss.item():.4f}, acc: {total_correct / total_samples:.4f}",
+                    end="\r",
+                )
+
+        grads = {
+            name: param.grad.detach().cpu().numpy().astype(np.float32)
+            for name, param in self.model.named_parameters()
+            if param.grad is not None
+        }
+
+        avg_acc = total_correct / total_samples
+        avg_loss = total_loss / total_samples
+
+        elapse = time.perf_counter() - t0
+        throughput = total_samples / elapse
+
+        return grads, avg_loss, avg_acc, elapse, throughput, total_samples
 
     def _register_handlers(self):
         """
@@ -159,64 +220,17 @@ class CIFAR10Worker(DDPClient):
             t0 = time.perf_counter()
 
             epoch = msg["epoch"]
+            seed = msg.get("seed", epoch)
 
-            # test dataset
-            self.model.eval()
-            eval_loss, eval_correct, eval_total = 0.0, 0, 0
-
-            with torch.no_grad():
-                for X, y in self.get_batch(epoch, test=True):
-                    outputs = self.model(X)
-                    loss = self.criterion(outputs, y)
-
-                    eval_loss += loss.item() * y.size(0)
-                    eval_correct += (outputs.argmax(1) == y).sum().item()
-                    eval_total += y.size(0)
-
-                    print(
-                        f"Eval loss: {loss.item():.4f}, correct: {eval_correct}/{eval_total}",
-                        end="\r",
-                    )
-
-            # train
-            self.model.train()
-            total_loss = torch.tensor(0.0)
-            total_correct = torch.tensor(0.0)
-            total_samples = torch.tensor(0.0)
-            n_batches = 0
-
-            for X, y in self.get_batch(epoch):
-                self.optimizer.zero_grad()
-                outputs = self.model(X)
-                loss = self.criterion(outputs, y)
-                loss.backward()  # acumula gradientes crudos, sin dividir
-
-                total_loss += loss.item() * y.size(0)
-                _, preds = torch.max(outputs, 1)
-                total_correct += (preds == y).sum().item()
-                total_samples += y.size(0)
-                n_batches += 1
-
-                if n_batches % 10 == 0:
-                    print(
-                        f"Batch {n_batches}, loss: {loss.item():.4f}, acc: {total_correct / total_samples:.4f}",
-                        end="\r",
-                    )
-
-            grads = {
-                name: param.grad.detach().cpu().numpy().astype(np.float32)
-                for name, param in self.model.named_parameters()
-                if param.grad is not None
-            }
-
-            avg_acc = total_correct / total_samples
-            avg_loss = total_loss / total_samples
-
-            elapse = time.perf_counter() - t0
-            throughput = total_samples / elapse
+            eval_loss, eval_correct, eval_total = self.test(seed)
+            grads, avg_loss, avg_acc, elapse, throughput, total_samples = self.train(
+                seed, t0
+            )
 
             log.info(
-                f"Worker {self.rank}: epoch={epoch}, acc={avg_acc:.4f}, loss={avg_loss:.4f}, elapse={elapse:.4f}, throughput={throughput:.4f}"
+                f"Worker {self.rank}: epoch={epoch}, "
+                f"acc={avg_acc:.4f}, loss={avg_loss:.4f}, "
+                f"elapse={elapse:.4f}, throughput={throughput:.4f}"
             )
 
             self.metrics.loc[len(self.metrics)] = [
