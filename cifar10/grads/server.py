@@ -115,7 +115,6 @@ class CIFAR10Server(DDPServer):
             with open(os.path.join(save_path, "train_params.txt"), "w") as f:
                 f.write(f"epochs: {self.epochs}\n")
                 f.write(f"lr: {self.lr}\n")
-                f.write(f"workers: {self.workers}\n")
                 f.write(f"min_workers: {self.min_workers}\n")
                 f.write(f"gray: {self.gray}\n")
                 f.write(f"normalize: {self.normalize}\n")
