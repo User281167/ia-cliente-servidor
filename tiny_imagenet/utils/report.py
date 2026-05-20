@@ -8,8 +8,8 @@ from openpyxl.drawing.image import Image as XLImage
 from PIL import Image
 from torch.utils.data import Subset
 
-from .load_data import TinyImageNetLazy
-from .wnids import load_tiny_imagenet_classes
+from tiny_imagenet.load_data import TinyImageNetLazy
+from tiny_imagenet.utils.wnids import tiny_imagenet_classes
 
 
 def clean_name(name: str):
@@ -73,7 +73,7 @@ def save_class_report(per_class_acc, conf, label_names, save_path):
     sorted_idx = torch.argsort(per_class_acc, descending=True)
 
     rows = []
-    classes = load_tiny_imagenet_classes()
+    classes = tiny_imagenet_classes
 
     for cls in sorted_idx.tolist():
         acc = per_class_acc[cls].item()

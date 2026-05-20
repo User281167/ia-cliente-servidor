@@ -8,9 +8,9 @@ import torch
 
 from ddp import DDPClient
 from ddp.pickle_utils import log, send_msg
+from tiny_imagenet.load_data import ShardSampler, TinyImageNetLazy
 from utils.format_time import format_elapse
 
-from .load_data import ShardSampler, TinyImageNetLazy
 from .model import get_tiny_imagenet_model
 
 
