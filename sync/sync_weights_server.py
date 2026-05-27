@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import torch
 
-from sinc import SyncGradServer
+from sync import SyncGradServer
 from utils import plot_grid
 
 

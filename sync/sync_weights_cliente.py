@@ -4,10 +4,10 @@ import numpy as np
 import torch
 
 from ddp.pickle_utils import log, send_msg
-from sinc import SincGradWorker
+from sync import SyncGradWorker
 
 
-class SincWeightsWorker(SincGradWorker):
+class SyncWeightsWorker(SyncGradWorker):
     """
     Cliente worker para el entrenamiento distribuido con sincronización de pesos.
     """

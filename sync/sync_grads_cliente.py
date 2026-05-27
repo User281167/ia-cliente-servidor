@@ -12,7 +12,7 @@ from ddp.pickle_utils import log, send_msg
 from .shard_sampler import DistributedEpochSampler
 
 
-class SincGradWorker(DDPClient):
+class SyncGradWorker(DDPClient):
     """
     Cliente worker para el entrenamiento distribuido con sincronización de gradientes.
     """

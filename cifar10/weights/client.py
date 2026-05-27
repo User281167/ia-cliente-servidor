@@ -3,10 +3,10 @@ import pandas as pd
 from cifar10.load_data import preload_cifar10_to_ram
 from cifar10.model import cifar10_get_model
 from ddp.pickle_utils import log
-from sinc import SincWeightsWorker
+from sync import SyncWeightsWorker
 
 
-class CIFAR10Worker(SincWeightsWorker):
+class CIFAR10Worker(SyncWeightsWorker):
     """
     Cliente worker para el entrenamiento distribuido de CIFAR-10.
     """
