@@ -6,10 +6,11 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from ddp import DDPClient, ShardAssignment
+from ddp import DDPClient
 from ddp.pickle_utils import log, send_msg
 
 from .shard import AsyncShardSampler, IndexedDataset
+from .shard_scheduler import ShardAssignment
 
 
 class AsyncGradWorker(DDPClient):
@@ -128,7 +129,7 @@ class AsyncGradWorker(DDPClient):
 
         return eval_loss / eval_total, eval_correct / eval_total
 
-    def train(self, t0):
+    def train(self, t0, w_global=None):
         self._ensure_loaders()
         self.model.train()
 

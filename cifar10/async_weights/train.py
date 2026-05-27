@@ -11,9 +11,10 @@ def run_server(
     epochs: int = 20,
     lr: float = 0.001,
     gamma: float = 0.1,
-    shard_size: int = 5000,
+    shard_size: int = 512,
     batch_size: int = 128,
     max_staleness: int = 10,
+    min_workers: int = 1,
     host: str = "0.0.0.0",
     port: int = 9090,
     save_path: str | None = None,
@@ -28,6 +29,7 @@ def run_server(
         shard_size=shard_size,
         batch_size=batch_size,
         max_staleness=max_staleness,
+        min_workers=min_workers,
         save_path=save_path,
     )
 
@@ -40,7 +42,7 @@ def run_server(
 
 
 def run_client(host, port, save_path=None):
-    client = CIFAR10Worker(host, port)
+    client = CIFAR10Worker(host, port, save_path)
 
     try:
         client.run()
@@ -50,7 +52,7 @@ def run_client(host, port, save_path=None):
         client.close()
 
         if save_path:
-            client.save_metrics(save_path)
+            client.save_metrics()
 
 
 if __name__ == "__main__":
@@ -64,9 +66,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--conv", action="store_true")
     parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--min-workers", type=int, default=1)
 
     parser.add_argument("--worker", action="store_true")
-    parser.add_argument("--shard-size", type=int, default=5000)
+    parser.add_argument("--shard-size", type=int, default=512)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument(
         "--max-staleness",
@@ -96,6 +99,7 @@ if __name__ == "__main__":
             shard_size=args.shard_size,
             batch_size=args.batch_size,
             max_staleness=args.max_staleness,
+            min_workers=args.min_workers,
             save_path=args.save,
             host=args.host,
             port=args.port,
