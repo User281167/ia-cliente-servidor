@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import secrets
 import threading
 from dataclasses import dataclass
@@ -32,8 +33,8 @@ class ShardScheduler:
         self.data_len = data_len
         self.shard_size = shard_size
         self.batch_size = batch_size
-        self.max_batches = data_len // batch_size
-        self.max_shards = data_len // shard_size
+        self.max_batches = math.ceil(data_len / batch_size)
+        self.max_shards = math.ceil(data_len / shard_size)
         self.seed = secrets.randbits(32)
 
         self._lock = threading.Lock()

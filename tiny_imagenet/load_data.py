@@ -4,6 +4,8 @@ from datasets import load_dataset
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset
 
+from ddp import ShardAssignment
+
 
 class TinyImageNetLazy(Dataset):
     """
@@ -89,4 +91,58 @@ class ShardSampler:
             persistent_workers=True,
             prefetch_factor=2,  # prefetch factor para cargar datos en paralelo
             pin_memory=False,  # NO cargar en memoria, evitar copias innecesarias
+        )
+
+
+class IndexedDataset(Dataset):
+    def __init__(self, dataset, indices):
+        self.dataset = dataset
+        self.indices = indices
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        return self.dataset[self.indices[idx]]
+
+
+class AsyncShardSampler:
+    def __init__(self):
+        self._epoch = None
+        self._seed = None
+        self._indices = None
+
+    def _ensure_shuffle(self, dataset, assignment: ShardAssignment):
+        """Realizar shuffle de la época actual"""
+        if self._epoch != assignment.epoch or self._seed != assignment.seed:
+            rng = np.random.default_rng(assignment.seed)
+
+            self._indices = rng.permutation(len(dataset))
+
+            self._epoch = assignment.epoch
+            self._seed = assignment.seed
+
+    def get_loader(self, dataset, assignment, test=False):
+        if test:
+            self._ensure_shuffle(dataset, assignment)
+
+            end = min(
+                assignment.start + assignment.length,
+                len(dataset),
+            )
+
+            shard = self._indices[assignment.start : end]
+        else:
+            shard = np.random.choice(
+                list(range(len(dataset))), assignment.length, replace=False
+            )
+
+        subset = IndexedDataset(dataset, shard)
+
+        return DataLoader(
+            subset,
+            batch_size=assignment.batch_size,
+            num_workers=2,
+            persistent_workers=False,
+            pin_memory=True,
         )

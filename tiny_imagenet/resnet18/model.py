@@ -68,11 +68,11 @@ class ResNet18(nn.Module):
         self.layer1 = self._make_layer(64, 64, stride=1)  # 32x32
         self.layer2 = self._make_layer(64, 128, stride=2)  # 16x16
         self.layer3 = self._make_layer(128, 256, stride=2)  # 8x8
-        self.layer4 = self._make_layer(256, 512, stride=2)  # 4x4
+        self.layer4 = self._make_layer(256, 256, stride=2)  # 4x4
 
         # Clasificador
         self.pool = nn.AdaptiveAvgPool2d((1, 1))  # → (B, 512, 1, 1)
-        self.fc = nn.Linear(512, num_classes)
+        self.fc = nn.Linear(256, num_classes)
 
     def _make_layer(self, in_ch, out_ch, stride):
         # Cada stage tiene 2 bloques; solo el primero puede cambiar stride/canales
@@ -112,9 +112,8 @@ def get_tiny_imagenet_model(lr=0.1, epochs=20, device=None):
     # SGD + momentum es el optimizador canónico para ResNet (vs Adam)
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
 
-    # Scheduler: reduce LR en epochs 100 y 150 (política original del paper)
     scheduler = optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones=[100, 150], gamma=0.1
+        optimizer, milestones=[15, 30], gamma=0.1
     )
 
     summary(model, input_size=(3, 64, 64))
