@@ -26,6 +26,7 @@ class SincGradWorker(DDPClient):
         self.model = None
         self.criterion = None
         self.optimizer = None
+        self.scheduler = None
         self.dataset = None
         self.test_dataset = None
 
@@ -81,7 +82,7 @@ class SincGradWorker(DDPClient):
 
         return eval_loss, eval_correct, eval_total
 
-    def train(self, seed, t0):
+    def train(self, seed, t0, w_global=None):
         # train
         self.model.train()
         total_loss = torch.tensor(0.0)
@@ -132,7 +133,7 @@ class SincGradWorker(DDPClient):
             avg_loss.item(),
             avg_acc.item(),
             elapse,
-            throughput.item(),
+            throughput,
             total_samples.item(),
         )
 

@@ -283,7 +283,7 @@ class SyncGradServer(DDPServer):
             f"Epoch {self.current_epoch + 1}/{self.epochs} "
             f"| loss: {loss:.4f} | eval_loss: {eval_loss:.4f} "
             f"| accuracy: {accuracy:.4f}  | eval_accuracy: {eval_accuracy:.4f} "
-            f"| gnorm: {gnorm:.4f} | elapsed: {format_elapse(elapsed)}"
+            f"| norm: {gnorm:.4f} | elapsed: {format_elapse(elapsed)}"
         )
 
         self.current_epoch += 1

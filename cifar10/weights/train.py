@@ -37,7 +37,7 @@ def run_server(
 
 
 def run_client(host, port, save_path=None):
-    client = CIFAR10Worker(host, port)
+    client = CIFAR10Worker(host, port, save_path)
 
     try:
         client.run()
@@ -47,7 +47,7 @@ def run_client(host, port, save_path=None):
         client.close()
 
         if save_path:
-            client.save_metrics(save_path)
+            client.save_metrics()
 
 
 if __name__ == "__main__":
