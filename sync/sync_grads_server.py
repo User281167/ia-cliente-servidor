@@ -46,6 +46,7 @@ class SyncGradServer(DDPServer):
 
         self.test_loader = None
         self.save_path = save_path
+        self.num_classes = 10
 
         self.metrics = pd.DataFrame(
             columns=[
@@ -96,7 +97,7 @@ class SyncGradServer(DDPServer):
         )
 
         # evaluate classification
-        acc, conf = self.evaluate_classification()
+        acc, _ = self.evaluate_classification()
 
         # argumentos
         if save_path:
@@ -133,7 +134,9 @@ class SyncGradServer(DDPServer):
         self.model.eval()
         correct = 0
         total = 0
-        confusion_matrix = MulticlassConfusionMatrix(num_classes=10).to(self.device)
+        confusion_matrix = MulticlassConfusionMatrix(num_classes=self.num_classes).to(
+            self.device
+        )
 
         with torch.no_grad():
             for images, labels in self.test_loader:

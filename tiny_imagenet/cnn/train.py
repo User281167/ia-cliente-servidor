@@ -1,6 +1,6 @@
 import argparse
 
-from .client import TinyImangeNetWorker
+from .client import TinyImageClient
 from .server import TinyImageNetServer
 
 
@@ -26,24 +26,22 @@ def run_server(
     try:
         server.run(host=host, port=port)
     except Exception as e:
-        print(f"Error al iniciar el servidor: {e}")
-    finally:
         server.stop_server()
-        server.results()
+        print(f"Error servidor: {e}")
 
 
 def run_client(host, port, save_path=None):
-    client = TinyImangeNetWorker(host, port)
+    client = TinyImageClient(host, port, save_path)
 
     try:
         client.run()
     except Exception as e:
-        print(f"Error al iniciar el cliente: {e}")
+        print(f"Error cliente: {e}")
     finally:
         client.close()
 
         if save_path:
-            client.save_metrics(save_path)
+            client.save_metrics()
 
 
 if __name__ == "__main__":
@@ -83,4 +81,6 @@ if __name__ == "__main__":
             min_workers=args.min_workers,
             save_path=args.save,
             worker_timeout=args.worker_timeout,
+            host=args.host,
+            port=args.port,
         )
