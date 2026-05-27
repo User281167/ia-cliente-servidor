@@ -1,152 +1,25 @@
-import os
-import time
-
-import numpy as np
-import pandas as pd
-import torch
-
 from cifar10.load_data import preload_cifar10_to_ram
 from cifar10.model import cifar10_get_model
-from ddp import DDPClient
-from ddp.pickle_utils import log, send_msg
+from ddp.pickle_utils import log
+from sinc import SincGradWorker
 
 
-class CIFAR10Worker(DDPClient):
+class CIFAR10Worker(SincGradWorker):
     """
     Cliente worker para el entrenamiento distribuido de CIFAR-10.
     """
 
-    def __init__(self, host, port):
-        super().__init__(host, port)
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.model = None
-        self.criterion = None
-        self.optimizer = None
-        self.dataset = None
-        self.test_dataset = None
-
-        self.rank = 0
-        self.world_size = 1
-        self.batch_size = 128
-
-        self.metrics = pd.DataFrame(
-            columns=["loss", "accuracy", "elapse", "throughput"]
-        )
-
+    def __init__(self, host, port, save_path):
+        super().__init__(host, port, save_path)
         self._register_handlers()
-
-    def save_metrics(self, path: str):
-        if not os.path.exists(path):
-            os.makedirs(path, exist_ok=True)
-
-        self.metrics.to_excel(
-            os.path.join(path, f"metrics_{self.rank}.xlsx"), index=False
-        )
-        description = self.metrics.describe(percentiles=[0.1, 0.5, 0.9])
-        description.to_excel(
-            os.path.join(path, f"metrics_{self.rank}_desc.xlsx"), index=True
-        )
-
-    def get_shard(self, seed, test=False):
-        """
-        Obtiene un lote de datos para la época dada.
-        Realizar shuffle global y shard (toma de datos) local.
-        Evita que los datos sean siempre los mismos en cada época y que se solapen entre workers.
-        """
-        N = len(self.test_dataset) if test else len(self.dataset)
-        rng = np.random.default_rng(seed=seed)
-
-        # shuffle global
-        # shard del worker
-        indices = rng.permutation(N)
-        shard = indices[self.rank :: self.world_size]
-
-        return shard
-
-    def get_batch(self, seed, test=False):
-        """
-        Minibatches para no entrenar con todo el conjunto y explotar la memoria.
-        """
-        shard = self.get_shard(seed, test)
-        # evitar el batch incompleto
-        n = (len(shard) // self.batch_size) * self.batch_size
-        shard = shard[:n]
-
-        for i in range(0, n, self.batch_size):
-            indixes = shard[i : i + self.batch_size]
-
-            X, y = self.test_dataset[indixes] if test else self.dataset[indixes]
-            X, y = X.to(self.device), y.to(self.device)
-            yield X, y
-
-    def test(self, seed):
-        # test dataset
-        self.model.eval()
-        eval_loss, eval_correct, eval_total = 0.0, 0, 0
-
-        with torch.no_grad():
-            for X, y in self.get_batch(seed, test=True):
-                outputs = self.model(X)
-                loss = self.criterion(outputs, y)
-
-                eval_loss += loss.item() * y.size(0)
-                eval_correct += (outputs.argmax(1) == y).sum().item()
-                eval_total += y.size(0)
-
-                print(
-                    f"Eval loss: {loss.item():.4f}, correct: {eval_correct}/{eval_total}",
-                    end="\r",
-                )
-
-        return eval_loss, eval_correct, eval_total
-
-    def train(self, seed, t0):
-        # train
-        self.model.train()
-        total_loss = torch.tensor(0.0)
-        total_correct = torch.tensor(0.0)
-        total_samples = torch.tensor(0.0)
-        n_batches = 0
-
-        for X, y in self.get_batch(seed):
-            self.optimizer.zero_grad()
-            outputs = self.model(X)
-            loss = self.criterion(outputs, y)
-            loss.backward()  # acumula gradientes crudos, sin dividir
-
-            total_loss += loss.item() * y.size(0)
-            _, preds = torch.max(outputs, 1)
-            total_correct += (preds == y).sum().item()
-            total_samples += y.size(0)
-            n_batches += 1
-
-            if n_batches % 10 == 0:
-                print(
-                    f"Batch {n_batches}, loss: {loss.item():.4f}, acc: {total_correct / total_samples:.4f}",
-                    end="\r",
-                )
-
-        grads = {
-            name: param.grad.detach().cpu().numpy().astype(np.float32)
-            for name, param in self.model.named_parameters()
-            if param.grad is not None
-        }
-
-        avg_acc = total_correct / total_samples
-        avg_loss = total_loss / total_samples
-
-        elapse = time.perf_counter() - t0
-        throughput = total_samples / elapse
-
-        return grads, avg_loss, avg_acc, elapse, throughput, total_samples
 
     def _register_handlers(self):
         """
         Registra los manejadores de mensajes del servidor.
         Ejecuta las funciones correspondientes cuando se reciben mensajes del servidor.
         """
+
+        super()._register_handlers()
 
         @self.on("config")
         def on_config(msg):
@@ -157,12 +30,11 @@ class CIFAR10Worker(DDPClient):
             normalize = payload["normalize"]
             conv = payload["conv"]
             lr = payload["lr"]
+            self.batch_size = payload["batch_size"]
 
             self.model, self.criterion, self.optimizer = cifar10_get_model(
                 gray=gray, conv=conv, lr=lr, device=self.device
             )
-
-            self.batch_size = payload["batch_size"]
 
             self.dataset = preload_cifar10_to_ram(
                 train=True,
@@ -176,83 +48,4 @@ class CIFAR10Worker(DDPClient):
                 normalize=normalize,
             )
 
-        @self.on("assign")
-        def on_assign(msg):
-            payload = msg["payload"]
-
-            self.rank = payload["rank"]
-            self.world_size = payload["world_size"]
-
-        @self.on("weights")
-        def on_weights(msg):
-            state = msg["payload"]
-
-            state_dict = self.model.state_dict()
-
-            for k in state_dict:
-                state_dict[k] = torch.tensor(state[k])
-
-            self.model.load_state_dict(state_dict)
-
-        @self.on("metrics")
-        def on_metrics(msg):
-            """
-            Enviar métricas al servidor
-            """
-            send_msg(
-                self._sock,
-                {
-                    "type": "metrics",
-                    "payload": {
-                        "data_frame": self.metrics,
-                        "rank": self.rank,
-                    },
-                },
-            )
-
-        @self.on("step")
-        def on_step(msg):
-            """
-            Manejador para el mensaje "step".
-            Recibe un lote de datos y realiza una iteración de entrenamiento.
-            No realiza optimización ni actualización de pesos.
-            """
-            t0 = time.perf_counter()
-
-            epoch = msg["epoch"]
-            seed = msg.get("seed", epoch)
-
-            eval_loss, eval_correct, eval_total = self.test(seed)
-            grads, avg_loss, avg_acc, elapse, throughput, total_samples = self.train(
-                seed, t0
-            )
-
-            log.info(
-                f"Worker {self.rank}: epoch={epoch}, "
-                f"acc={avg_acc:.4f}, loss={avg_loss:.4f}, "
-                f"elapse={elapse:.4f}, throughput={throughput:.4f}"
-            )
-
-            self.metrics.loc[len(self.metrics)] = [
-                avg_loss,
-                avg_acc,
-                elapse,
-                throughput,
-            ]
-
-            send_msg(
-                self._sock,
-                {
-                    "type": "result",
-                    "payload": {
-                        "grads": grads,
-                        "samples": total_samples,
-                        "loss": avg_loss,
-                        "accuracy": avg_acc,
-                        # test
-                        "eval_loss": eval_loss,  # suma, no promedio
-                        "eval_correct": eval_correct,
-                        "eval_total": eval_total,
-                    },
-                },
-            )
+            self.load_samplers(preload=True)
