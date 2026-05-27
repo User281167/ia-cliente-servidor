@@ -10,6 +10,7 @@ def run_server(
     conv: bool = False,
     epochs: int = 20,
     lr: float = 0.001,
+    gamma: float = 0.1,
     shard_size: int = 5000,
     batch_size: int = 128,
     max_staleness: int = 10,
@@ -23,6 +24,7 @@ def run_server(
         conv=conv,
         epochs=epochs,
         lr=lr,
+        gamma=gamma,
         shard_size=shard_size,
         batch_size=batch_size,
         max_staleness=max_staleness,
@@ -58,6 +60,7 @@ if __name__ == "__main__":
     parser.add_argument("--rgb", action="store_true")
     parser.add_argument("--normalize", action="store_true")
     parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--gamma", type=float, default=0.1)
 
     parser.add_argument("--conv", action="store_true")
     parser.add_argument("--epochs", type=int, default=20)
@@ -89,6 +92,7 @@ if __name__ == "__main__":
             conv=args.conv,
             epochs=args.epochs,
             lr=args.lr,
+            gamma=args.gamma,
             shard_size=args.shard_size,
             batch_size=args.batch_size,
             max_staleness=args.max_staleness,

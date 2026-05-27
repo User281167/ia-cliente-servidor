@@ -35,6 +35,7 @@ class CIFAR10Server(DDPAsyncServer):
         conv: bool = False,
         epochs: int = 20,
         lr: float = 0.001,
+        gamma: float = 0.1,
         shard_size: int = 5000,
         batch_size: int = 128,
         max_staleness: int = 10,
@@ -55,6 +56,7 @@ class CIFAR10Server(DDPAsyncServer):
         self.normalize = normalize
         self.conv = conv
         self.lr = lr
+        self.gamma = gamma
         self.batch_size = batch_size
         self.shard_size = shard_size
         self.save_path = save_path
@@ -88,7 +90,7 @@ class CIFAR10Server(DDPAsyncServer):
         super()._remove_dead(wids)
 
     def _gamma(self, staleness: int) -> float:
-        return self.lr / (1.0 + staleness)
+        return self.gamma / (1.0 + staleness)
 
     def evaluate(self) -> tuple[float, float]:
         self.model.eval()
