@@ -80,6 +80,7 @@ def plot_grid(
     labels: List[str | List[str] | tuple],  # titulo o (titulo, label1, label2, ...)
     n_cols: int | None = None,
     save_path: str | None = None,
+    save_title: str | None = None,
     ax_as_int: bool = True,
     x_label: str = "Epoch",
 ):
@@ -143,6 +144,6 @@ def plot_grid(
             ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
 
     if save_path:
-        plt.savefig(f"{save_path}/grid.png")
+        plt.savefig(f"{save_path}/grid{save_title or ''}.png")
     else:
         plt.show()

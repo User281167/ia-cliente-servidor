@@ -64,7 +64,6 @@ class TinyImageNetServer(SyncWeightsServer):
         if save_path:
             os.makedirs(save_path, exist_ok=True)
 
-        if save_path:
             self.metrics.to_excel(os.path.join(save_path, "metrics_server.xlsx"))
 
             description = self.metrics.describe(percentiles=[0.1, 0.5, 0.9])

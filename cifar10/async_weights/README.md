@@ -20,6 +20,7 @@ python -m cifar10.async_weights.train --worker --host localhost --save "results"
 ### Parametros servidor
 - `--lr`
 - `--epochs`
+- `--test-each`
 - `--shard-size`
 - `--batch-size`
 - `--max-staleness`

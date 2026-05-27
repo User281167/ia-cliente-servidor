@@ -36,6 +36,7 @@ class AsyncGradServer(DDPAsyncServer):
         shard_size: int = 5000,
         batch_size: int = 128,
         max_staleness: int = 10,
+        test_each: int = 10,
         min_workers: int = 1,
         config: dict | None = None,
         save_path: str | None = None,
@@ -53,6 +54,7 @@ class AsyncGradServer(DDPAsyncServer):
         self.batch_size = batch_size
         self.shard_size = shard_size
         self.max_staleness = max_staleness
+        self.test_each = test_each
         self.epochs = epochs
         self.save_path = save_path
 
@@ -63,18 +65,20 @@ class AsyncGradServer(DDPAsyncServer):
         self._scheduler = ShardScheduler(data_len, shard_size, batch_size)
         self.k = 0
         self._k_lock = threading.Lock()
+        self._last_test_worker_idx = -1
 
         self.metrics = pd.DataFrame(
             columns=[
                 "loss",
                 "accuracy",
-                "eval_loss",
-                "eval_accuracy",
                 "grad_norm",
                 "staleness",
                 "gamma",
                 "elapsed",
             ]
+        )
+        self.test_metrics = pd.DataFrame(
+            columns=["iter", "worker_id", "loss", "accuracy", "elapsed"]
         )
 
         self._register_event_handlers()
@@ -188,6 +192,31 @@ class AsyncGradServer(DDPAsyncServer):
             log.error(f"No se pudo enviar step a worker {wid}: {e}")
             self._remove_dead([wid])
 
+    def _send_test(
+        self,
+        wid: int,
+        state: dict,
+        k: int,
+    ) -> None:
+        with self._workers_lock:
+            sock = self._workers.get(wid)
+
+        if not sock:
+            return
+
+        try:
+            send_msg(
+                sock,
+                DDPMessage.msg(
+                    "test",
+                    iter=k,
+                    weights=state,
+                ),
+            )
+        except Exception as e:
+            log.error(f"No se pudo enviar test a worker {wid}: {e}")
+            self._remove_dead([wid])
+
     def _register_event_handlers(self) -> None:
         @self.on("ready")
         def _handle_ready(msg: dict) -> None:
@@ -209,8 +238,6 @@ class AsyncGradServer(DDPAsyncServer):
             samples = payload.get("samples", 0)
             loss = payload.get("loss", float("nan"))
             accuracy = payload.get("accuracy", float("nan"))
-            eval_loss = payload.get("eval_loss", float("nan"))
-            eval_accuracy = payload.get("eval_accuracy", float("nan"))
             iter_sent = payload.get("iter_sent", self.k)
             shard_idx = payload.get("shard_idx", None)
 
@@ -228,19 +255,22 @@ class AsyncGradServer(DDPAsyncServer):
                 fresh_state = self._get_state_numpy()
                 k_new = self.k
 
+                send_test = k_new % self.test_each == 0
+
                 if staleness <= self.max_staleness:
                     self.metrics.loc[len(self.metrics)] = [
                         loss,
                         accuracy,
-                        eval_loss,
-                        eval_accuracy,
                         grad_norm,
                         staleness,
                         gamma,
                         time.perf_counter() - t0,
                     ]
 
-            self._send_step_to(wid, fresh_state, k_new)
+            if send_test:
+                self._send_test(wid, fresh_state, k_new)
+            else:
+                self._send_step_to(wid, fresh_state, k_new)
 
             if shard_idx is not None:
                 self._scheduler.complete(wid, shard_idx)
@@ -249,10 +279,36 @@ class AsyncGradServer(DDPAsyncServer):
                 log.info(
                     f"[k={k_now}] epoch={self._scheduler.current_epoch}/{self.epochs} "
                     f"worker={wid} staleness={staleness} gamma={gamma:.6f} "
-                    f"samples={samples} loss={loss:.4f} eval_loss={eval_loss:.4f} "
-                    f"accuracy={accuracy:.4f} eval_accuracy={eval_accuracy:.4f} "
+                    f"samples={samples} loss={loss:.4f} accuracy={accuracy:.4f} "
                     f"grad_norm={grad_norm:.4f}"
                 )
+
+        @self.on("test_result")
+        def _handle_test_result(msg: dict) -> None:
+            wid = msg["worker_id"]
+            payload = msg["payload"]
+
+            self.test_metrics.loc[len(self.test_metrics)] = [
+                payload.get("iter", self.k),
+                wid,
+                payload.get("loss", float("nan")),
+                payload.get("accuracy", float("nan")),
+                payload.get("elapsed", float("nan")),
+            ]
+
+            log.info(
+                f"[test k={payload.get('iter', self.k)}] worker={wid} "
+                f"loss={payload.get('loss', float('nan')):.4f} "
+                f"accuracy={payload.get('accuracy', float('nan')):.4f} "
+                f"elapsed={payload.get('elapsed', float('nan')):.4f}"
+            )
+
+            with self._k_lock:
+                k_new = self.k + 1
+                self.k = k_new
+                fresh_state = self._get_state_numpy()
+
+            self._send_step_to(wid, fresh_state, k_new)
 
         @self.on("metrics")
         def _handle_metrics(msg: dict) -> None:
@@ -282,32 +338,54 @@ class AsyncGradServer(DDPAsyncServer):
         if save_path:
             os.makedirs(save_path, exist_ok=True)
             self.metrics.to_excel(os.path.join(save_path, "metrics_server.xlsx"))
+            self.test_metrics.to_excel(
+                os.path.join(save_path, "test_metrics_server.xlsx"),
+                index=False,
+            )
             self.metrics.describe(percentiles=[0.1, 0.5, 0.9]).to_excel(
                 os.path.join(save_path, "description_server.xlsx"), index=True
             )
 
-        if len(self.metrics) > 0:
-            plot_grid(
-                history=[
-                    (
-                        (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
-                        (
-                            self.metrics["accuracy"][i],
-                            self.metrics["eval_accuracy"][i],
-                        ),
-                        self.metrics["grad_norm"][i],
-                    )
-                    for i in range(len(self.metrics))
-                ],
-                labels=[
-                    ("Loss", "Train", "Test"),
-                    ("Accuracy", "Train", "Test"),
-                    "Grad Norm",
-                ],
-                n_cols=1,
-                save_path=save_path,
-                x_label="Iteration",
+        history = [
+            (
+                self.metrics["loss"][i],
+                self.metrics["accuracy"][i],
+                self.metrics["grad_norm"][i],
             )
+            for i in range(len(self.metrics))
+        ]
+
+        plot_grid(
+            history=history,
+            labels=[
+                "Loss",
+                "Accuracy",
+                "Grad Norm",
+            ],
+            n_cols=1,
+            save_path=save_path,
+            x_label="Iteration",
+        )
+
+        history = [
+            (
+                self.test_metrics["loss"][i],
+                self.test_metrics["accuracy"][i],
+            )
+            for i in range(len(self.test_metrics))
+        ]
+
+        plot_grid(
+            history=history,
+            labels=[
+                "Loss",
+                "Accuracy",
+            ],
+            n_cols=1,
+            save_path=save_path,
+            x_label="Iteration",
+            save_title="Test Metrics",
+        )
 
         if save_path:
             with open(os.path.join(save_path, "train_params.txt"), "w") as f:
@@ -317,6 +395,7 @@ class AsyncGradServer(DDPAsyncServer):
                 f.write(f"shard_size: {self.shard_size}\n")
                 f.write(f"batch_size: {self.batch_size}\n")
                 f.write(f"max_staleness: {self.max_staleness}\n")
+                f.write(f"test_each: {self.test_each}\n")
                 f.write(f"run_epochs: {self._scheduler.current_epoch}\n")
                 f.write(f"k: {self.k}\n")
 

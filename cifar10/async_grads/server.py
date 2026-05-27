@@ -22,6 +22,7 @@ class CIFAR10Server(AsyncGradServer):
         shard_size: int = 5000,
         batch_size: int = 128,
         max_staleness: int = 10,
+        test_each: int = 10,
         min_workers: int = 1,
         save_path: str | None = None,
     ):
@@ -41,6 +42,7 @@ class CIFAR10Server(AsyncGradServer):
             shard_size=shard_size,
             batch_size=batch_size,
             max_staleness=max_staleness,
+            test_each=test_each,
             min_workers=min_workers,
             config=config,
             save_path=save_path,

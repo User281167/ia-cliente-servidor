@@ -14,6 +14,7 @@ def run_server(
     shard_size: int = 512,
     batch_size: int = 128,
     max_staleness: int = 10,
+    test_each: int = 10,
     min_workers: int = 1,
     host: str = "0.0.0.0",
     port: int = 9090,
@@ -29,6 +30,7 @@ def run_server(
         shard_size=shard_size,
         batch_size=batch_size,
         max_staleness=max_staleness,
+        test_each=test_each,
         min_workers=min_workers,
         save_path=save_path,
     )
@@ -77,6 +79,7 @@ if __name__ == "__main__":
         default=10,
         help="Si un worker responde despues de max-staleness, se descarta su delta",
     )
+    parser.add_argument("--test-each", type=int, default=10)
 
     parser.add_argument("--save", type=str, default=None)
 
@@ -99,6 +102,7 @@ if __name__ == "__main__":
             shard_size=args.shard_size,
             batch_size=args.batch_size,
             max_staleness=args.max_staleness,
+            test_each=args.test_each,
             min_workers=args.min_workers,
             save_path=args.save,
             host=args.host,

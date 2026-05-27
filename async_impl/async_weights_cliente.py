@@ -105,16 +105,14 @@ class AsyncWeightsWorker(AsyncGradWorker):
             w_global = {k: v.clone() for k, v in self.model.state_dict().items()}
 
             t0 = time.perf_counter()
-            eval_loss, eval_accuracy = self.test()
             delta, loss, accuracy, elapse, throughput, samples = self.train(
                 t0,
                 w_global,
             )
 
             log.info(
-                f"Worker: epoch={epoch} "
-                f"| acc={accuracy:.4f} | test_acc={eval_accuracy:.4f} "
-                f"| loss={loss:.4f} | test_loss={eval_loss:.4f} "
+                f"Worker: {self._worker_id} | epoch={epoch} "
+                f"| acc={accuracy:.4f} | loss={loss:.4f} "
                 f"| elapsed={elapse:.4f} | throughput={throughput:.4f}"
             )
 
@@ -140,8 +138,6 @@ class AsyncWeightsWorker(AsyncGradWorker):
                         "accuracy": accuracy,
                         "iter_sent": k_iter,
                         "shard_idx": self.assignment.shard_idx,
-                        "eval_loss": eval_loss,
-                        "eval_accuracy": eval_accuracy,
                     },
                 },
             )

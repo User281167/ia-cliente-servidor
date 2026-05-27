@@ -76,7 +76,7 @@ class AsyncGradWorker(DDPClient):
             self.indexed_dataset,
             batch_size=self.batch_size,
             num_workers=0 if preload else 2,
-            persistent_workers=False if preload else True,
+            persistent_workers=False,
             prefetch_factor=None if preload else 2,
             pin_memory=torch.cuda.is_available(),
         )
@@ -86,7 +86,7 @@ class AsyncGradWorker(DDPClient):
             self.test_indexed_dataset,
             batch_size=self.batch_size,
             num_workers=0 if preload else 2,
-            persistent_workers=False if preload else True,
+            persistent_workers=False,
             prefetch_factor=None if preload else 2,
             pin_memory=torch.cuda.is_available(),
         )
@@ -98,13 +98,10 @@ class AsyncGradWorker(DDPClient):
     def test(self):
         self._ensure_loaders()
         self.model.eval()
-        eval_loss, eval_correct, eval_total = 0.0, 0, 0
+        t0 = time.perf_counter()
+        test_loss, test_correct, test_total = 0.0, 0, 0
 
-        indices = self.sampler.get_indices(
-            self.test_dataset,
-            self.assignment,
-            test=True,
-        )
+        indices = np.arange(len(self.test_dataset))
         self.test_indexed_dataset.set_indices(indices)
 
         with torch.no_grad():
@@ -114,20 +111,21 @@ class AsyncGradWorker(DDPClient):
                 outputs = self.model(X)
                 loss = self.criterion(outputs, y)
 
-                eval_loss += loss.item() * y.size(0)
-                eval_correct += (outputs.argmax(1) == y).sum().item()
-                eval_total += y.size(0)
+                test_loss += loss.item() * y.size(0)
+                test_correct += (outputs.argmax(1) == y).sum().item()
+                test_total += y.size(0)
 
                 print(
                     f"Eval loss: {loss.item():.4f} "
-                    f"| correct: {eval_correct}/{eval_total}",
+                    f"| correct: {test_correct}/{test_total}",
                     end="\r",
                 )
 
-        if eval_total == 0:
-            return 0.0, 0.0
+        if test_total == 0:
+            return 0.0, 0.0, 0.0
 
-        return eval_loss / eval_total, eval_correct / eval_total
+        elapsed = time.perf_counter() - t0
+        return test_loss / test_total, test_correct / test_total, elapsed
 
     def train(self, t0, w_global=None):
         self._ensure_loaders()
@@ -239,13 +237,11 @@ class AsyncGradWorker(DDPClient):
             self.batch_size = assignment.batch_size
 
             t0 = time.perf_counter()
-            eval_loss, eval_accuracy = self.test()
             grads, loss, accuracy, elapse, throughput, samples = self.train(t0)
 
             log.info(
-                f"Worker: epoch={epoch} "
-                f"| acc={accuracy:.4f} | test_acc={eval_accuracy:.4f} "
-                f"| loss={loss:.4f} | test_loss={eval_loss:.4f} "
+                f"Worker: {self._worker_id} | epoch={epoch} "
+                f"| acc={accuracy:.4f} | loss={loss:.4f} "
                 f"| elapsed={elapse:.4f} | throughput={throughput:.4f}"
             )
 
@@ -271,8 +267,47 @@ class AsyncGradWorker(DDPClient):
                         "accuracy": accuracy,
                         "iter_sent": k_iter,
                         "shard_idx": self.assignment.shard_idx,
-                        "eval_loss": eval_loss,
-                        "eval_accuracy": eval_accuracy,
+                    },
+                },
+            )
+
+        @self.on("test")
+        def on_test(msg):
+            if self.stop:
+                return
+
+            payload = msg.get("payload", None)
+            if payload is None:
+                log.warning("No hay payload en test")
+                return
+
+            k_iter = payload.get("iter", 0)
+            state = payload.get("weights", None)
+
+            if state is None:
+                log.warning("No hay weights en test")
+                return
+
+            state_dict = {k: torch.tensor(v) for k, v in state.items()}
+            self.model.load_state_dict(state_dict)
+
+            loss, accuracy, elapsed = self.test()
+
+            log.info(
+                f"Test: iter={k_iter} | loss={loss:.4f} "
+                f"| accuracy={accuracy:.4f} | elapsed={elapsed:.4f}"
+            )
+
+            send_msg(
+                self._sock,
+                {
+                    "type": "test_result",
+                    "worker_id": self._worker_id,
+                    "payload": {
+                        "iter": k_iter,
+                        "loss": loss,
+                        "accuracy": accuracy,
+                        "elapsed": elapsed,
                     },
                 },
             )

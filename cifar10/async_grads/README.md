@@ -23,6 +23,7 @@ python -m cifar10.async_grads.train --worker --host localhost --save "results"
 ### Parámetros para el servidor
 - --lr 
 - --epochs
+- --test-each: Cantidad de iteraciones para el test
 - --shard-size: Tamaño de los shards de datos (datos a tomar en el worker)
 - --batch-size: Tamaño de los batches de datos (datos a procesar en cada iteración en el worker <= tamaño del shard)
 - --port

@@ -3,6 +3,7 @@ import time
 
 import pandas as pd
 import torch
+
 from ddp.logger import log
 from utils import plot_grid
 
@@ -24,6 +25,7 @@ class AsyncWeightsServer(AsyncGradServer):
         shard_size: int = 5000,
         batch_size: int = 128,
         max_staleness: int = 10,
+        test_each: int = 10,
         min_workers: int = 1,
         config: dict | None = None,
         save_path: str | None = None,
@@ -42,6 +44,7 @@ class AsyncWeightsServer(AsyncGradServer):
             shard_size=shard_size,
             batch_size=batch_size,
             max_staleness=max_staleness,
+            test_each=test_each,
             min_workers=min_workers,
             config=config,
             save_path=save_path,
@@ -52,8 +55,6 @@ class AsyncWeightsServer(AsyncGradServer):
             columns=[
                 "loss",
                 "accuracy",
-                "eval_loss",
-                "eval_accuracy",
                 "delta_norm",
                 "staleness",
                 "gamma",
@@ -84,15 +85,7 @@ class AsyncWeightsServer(AsyncGradServer):
         return delta_norm_sq**0.5
 
     def _register_event_handlers(self) -> None:
-        @self.on("ready")
-        def _handle_ready(msg: dict) -> None:
-            wid = msg["worker_id"]
-
-            with self._k_lock:
-                state = self._get_state_numpy()
-                k = self.k
-
-            self._send_step_to(wid, state, k)
+        super()._register_event_handlers()
 
         @self.on("result")
         def _handle_result(msg: dict) -> None:
@@ -104,8 +97,6 @@ class AsyncWeightsServer(AsyncGradServer):
             samples = payload.get("samples", 0)
             loss = payload.get("loss", float("nan"))
             accuracy = payload.get("accuracy", float("nan"))
-            eval_loss = payload.get("eval_loss", float("nan"))
-            eval_accuracy = payload.get("eval_accuracy", float("nan"))
             iter_sent = payload.get("iter_sent", self.k)
             shard_idx = payload.get("shard_idx", None)
 
@@ -123,19 +114,22 @@ class AsyncWeightsServer(AsyncGradServer):
                 fresh_state = self._get_state_numpy()
                 k_new = self.k
 
+                send_test = k_new % self.test_each == 0
+
                 if staleness <= self.max_staleness:
                     self.metrics.loc[len(self.metrics)] = [
                         loss,
                         accuracy,
-                        eval_loss,
-                        eval_accuracy,
                         delta_norm,
                         staleness,
                         gamma,
                         time.perf_counter() - t0,
                     ]
 
-            self._send_step_to(wid, fresh_state, k_new)
+            if send_test:
+                self._send_test(wid, fresh_state, k_new)
+            else:
+                self._send_step_to(wid, fresh_state, k_new)
 
             if shard_idx is not None:
                 self._scheduler.complete(wid, shard_idx)
@@ -144,25 +138,9 @@ class AsyncWeightsServer(AsyncGradServer):
                 log.info(
                     f"[k={k_now}] epoch={self._scheduler.current_epoch}/{self.epochs} "
                     f"worker={wid} staleness={staleness} gamma={gamma:.6f} "
-                    f"samples={samples} loss={loss:.4f} eval_loss={eval_loss:.4f} "
-                    f"accuracy={accuracy:.4f} eval_accuracy={eval_accuracy:.4f} "
+                    f"samples={samples} loss={loss:.4f} accuracy={accuracy:.4f} "
                     f"delta_norm={delta_norm:.4f}"
                 )
-
-        @self.on("metrics")
-        def _handle_metrics(msg: dict) -> None:
-            if self.save_path is None:
-                return
-
-            wid = msg["worker_id"]
-            payload = msg["payload"]
-            df = pd.DataFrame(payload["data_frame"])
-
-            df.to_excel(os.path.join(self.save_path, f"metrics_{wid}.xlsx"))
-            df.describe(percentiles=[0.1, 0.5, 0.9]).to_excel(
-                os.path.join(self.save_path, f"description_{wid}.xlsx"),
-                index=True,
-            )
 
     def results(self) -> None:
         save_path = self.save_path
@@ -170,32 +148,54 @@ class AsyncWeightsServer(AsyncGradServer):
         if save_path:
             os.makedirs(save_path, exist_ok=True)
             self.metrics.to_excel(os.path.join(save_path, "metrics_server.xlsx"))
+            self.test_metrics.to_excel(
+                os.path.join(save_path, "test_metrics_server.xlsx"),
+                index=False,
+            )
             self.metrics.describe(percentiles=[0.1, 0.5, 0.9]).to_excel(
                 os.path.join(save_path, "description_server.xlsx"), index=True
             )
 
-        if len(self.metrics) > 0:
-            plot_grid(
-                history=[
-                    (
-                        (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
-                        (
-                            self.metrics["accuracy"][i],
-                            self.metrics["eval_accuracy"][i],
-                        ),
-                        self.metrics["delta_norm"][i],
-                    )
-                    for i in range(len(self.metrics))
-                ],
-                labels=[
-                    ("Loss", "Train", "Test"),
-                    ("Accuracy", "Train", "Test"),
-                    "Delta Norm",
-                ],
-                n_cols=1,
-                save_path=save_path,
-                x_label="Iteration",
+        history = [
+            (
+                self.metrics["loss"][i],
+                self.metrics["accuracy"][i],
+                self.metrics["delta_norm"][i],
             )
+            for i in range(len(self.metrics))
+        ]
+
+        plot_grid(
+            history=history,
+            labels=[
+                "Loss",
+                "Accuracy",
+                "Delta Norm",
+            ],
+            n_cols=1,
+            save_path=save_path,
+            x_label="Iteration",
+        )
+
+        history = [
+            (
+                self.test_metrics["loss"][i],
+                self.test_metrics["accuracy"][i],
+            )
+            for i in range(len(self.test_metrics))
+        ]
+
+        plot_grid(
+            history=history,
+            labels=[
+                "Loss",
+                "Accuracy",
+            ],
+            n_cols=1,
+            save_path=save_path,
+            x_label="Iteration",
+            save_title="Test Metrics",
+        )
 
         if save_path:
             with open(os.path.join(save_path, "train_params.txt"), "w") as f:
@@ -206,5 +206,6 @@ class AsyncWeightsServer(AsyncGradServer):
                 f.write(f"shard_size: {self.shard_size}\n")
                 f.write(f"batch_size: {self.batch_size}\n")
                 f.write(f"max_staleness: {self.max_staleness}\n")
+                f.write(f"test_each: {self.test_each}\n")
                 f.write(f"run_epochs: {self._scheduler.current_epoch}\n")
                 f.write(f"k: {self.k}\n")
