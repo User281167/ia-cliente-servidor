@@ -1,53 +1,50 @@
 import torchvision.transforms as transforms
 from datasets import load_dataset
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 
 class TinyImageNetLazy(Dataset):
-    """
-    Dataset lazy — HuggingFace carga bajo demanda con arrow memory-map.
-    No precarga nada en RAM. Solo accede al índice pedido.
-
-    Normalización recomendada
-    """
-
-    def __init__(self, split="train"):
-        # HuggingFace usa Arrow files (memory-mapped), no carga en RAM
-        self.hf_dataset = load_dataset(
+    def __init__(self, split="train", transform=None):
+        hf_dataset = load_dataset(
             "Maysee/tiny-imagenet",
             split=split,
             keep_in_memory=False,
         )
 
-        mean = (0.485, 0.456, 0.406)
-        std = (0.229, 0.224, 0.225)
+        # Precargar todo en listas Python (RAM) — ~500MB train, ~50MB val
+        # Esto elimina el I/O de Arrow en cada __getitem__
+        print(f"Precargando {len(hf_dataset)} imágenes en RAM...")
+        self.images = []
+        self.labels = []
 
-        self.transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize(mean, std),
-            ]
-        )
+        for sample in hf_dataset:
+            img = sample["image"]
+
+            if not isinstance(img, Image.Image):
+                img = Image.fromarray(img)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+
+            self.images.append(img)
+            self.labels.append(sample["label"])
+
+        print("Precarga completa.")
+
+        if transform is not None:
+            self.transform = transform
+        else:
+            mean = (0.485, 0.456, 0.406)
+            std = (0.229, 0.224, 0.225)
+            self.transform = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean, std),
+                ]
+            )
 
     def __len__(self):
-        return len(self.hf_dataset)
+        return len(self.labels)
 
     def __getitem__(self, idx):
-        sample = self.hf_dataset[idx]  # lee solo este registro del disco
-        image = sample["image"]
-        label = sample["label"]
-
-        if not isinstance(image, Image.Image):
-            image = Image.fromarray(image)
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-
-        return self.transform(image), label
-
-    def get_loader(self, batch_size=32, shuffle=True):
-        return DataLoader(
-            self,
-            batch_size=batch_size,
-            shuffle=shuffle,
-        )
+        return self.transform(self.images[idx]), self.labels[idx]

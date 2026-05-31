@@ -167,7 +167,7 @@ class AsyncGradWorker(DDPClient):
             self.scheduler.step()
 
         grads = {
-            name: param.grad.detach().cpu().numpy().astype(np.float32)
+            name: (param.grad / n_batches).detach().cpu().numpy().astype(np.float32)
             for name, param in self.model.named_parameters()
             if param.grad is not None
         }
