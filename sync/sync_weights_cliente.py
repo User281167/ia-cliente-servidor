@@ -15,9 +15,8 @@ class SyncWeightsWorker(SyncGradWorker):
     def __init__(self, host, port, save_path):
         super().__init__(host, port, save_path)
 
-    def train(self, seed, t0, w_global):
+    def train(self, seed, t0, w_global=None):
         total_loss, total_correct, total_samples = 0.0, 0, 0
-        steps_done = 0
         n_batches = 0
 
         for X, y in self.loader:
@@ -33,12 +32,13 @@ class SyncWeightsWorker(SyncGradWorker):
             total_loss += loss.item() * y.size(0)
             total_correct += (preds == y).sum().item()
             total_samples += y.size(0)
-            steps_done += 1
             n_batches += 1
 
             if n_batches % 10 == 0:
                 print(
-                    f"Batch {n_batches}, loss: {loss.item():.4f}, acc: {total_correct / total_samples:.4f}",
+                    f"Batch {n_batches}| "
+                    f"loss: {loss.item():.4f} | "
+                    f"acc: {total_correct / total_samples:.4f}",
                     end="\r",
                 )
 

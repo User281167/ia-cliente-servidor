@@ -16,8 +16,6 @@ class CIFAR10Server(AsyncWeightsServer):
 
     def __init__(
         self,
-        gray: bool = False,
-        normalize: bool = False,
         epochs: int = 20,
         lr: float = 0.01,
         gamma: float = 0.5,
@@ -30,8 +28,8 @@ class CIFAR10Server(AsyncWeightsServer):
         save_path: str | None = None,
     ):
         config = {
-            "gray": gray,
-            "normalize": normalize,
+            "gray": False,
+            "normalize": True,
             "epochs": epochs,
             "lr": lr,
             "batch_size": batch_size,
@@ -51,8 +49,8 @@ class CIFAR10Server(AsyncWeightsServer):
             save_path=save_path,
         )
 
-        self.gray = gray
-        self.normalize = normalize
+        self.gray = False
+        self.normalize = True
         self.weight_decay = weight_decay
 
         self.model, self.criterion, self.optimizer, _ = get_cifar10_resnet18_model(
@@ -61,8 +59,8 @@ class CIFAR10Server(AsyncWeightsServer):
 
         self.test_loader = get_cifar10_dataloader(
             train=False,
-            gray=gray,
-            normalize=normalize,
+            gray=False,
+            normalize=True,
             batch_size=batch_size,
         )
 

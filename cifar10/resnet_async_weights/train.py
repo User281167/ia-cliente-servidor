@@ -5,8 +5,6 @@ from .server import CIFAR10Server
 
 
 def run_server(
-    gray: bool = False,
-    normalize: bool = False,
     epochs: int = 50,
     lr: float = 0.01,
     gamma: float = 0.5,
@@ -21,8 +19,6 @@ def run_server(
     save_path: str | None = None,
 ):
     server = CIFAR10Server(
-        gray=gray,
-        normalize=normalize,
         epochs=epochs,
         lr=lr,
         gamma=gamma,
@@ -61,8 +57,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=9090)
-    parser.add_argument("--rgb", action="store_true")
-    parser.add_argument("--normalize", action="store_true")
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--weight-decay", type=float, default=5e-4)
@@ -94,8 +88,6 @@ if __name__ == "__main__":
     else:
         print(f"Starting server on {args.host}:{args.port}")
         run_server(
-            gray=not args.rgb,
-            normalize=args.normalize,
             epochs=args.epochs,
             lr=args.lr,
             gamma=args.gamma,

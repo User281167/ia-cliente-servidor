@@ -401,7 +401,7 @@ class AsyncGradServer(DDPAsyncServer):
 
     def run(self, host: str = "0.0.0.0", port: int = 9999) -> None:
         self.start_server(host=host, port=port)
-        log.info("Servidor async grads listo. Esperando workers...")
+        log.info(f"Servidor async listo en {host}:{port}")
 
         try:
             self.train()
