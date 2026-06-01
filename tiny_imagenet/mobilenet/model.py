@@ -9,13 +9,22 @@ MOBILENET_STD = (0.229, 0.224, 0.225)
 
 
 def mobilenet_transform(train=True):
+    """
+    Tiny ImageNet solo tiene alrededor de 500 imágenes por clase.
+    Para mejorar el dataset y volver más variado hacer data augmentation.
+    """
+
     if train:
         return transforms.Compose(
             [
                 transforms.Resize(70),  # ligeramente mayor para crop
-                transforms.RandomCrop(64),  # crop aleatorio → augmentation
+                transforms.RandomCrop(64),  # crop aleatorio
                 transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                transforms.ColorJitter(
+                    brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
+                ),
+                transforms.RandomRotation(10),  # rotación leve
+                transforms.RandomGrayscale(p=0.05),  # grayscale ocasional
                 transforms.ToTensor(),
                 transforms.Normalize(MOBILENET_MEAN, MOBILENET_STD),
             ]
@@ -44,9 +53,12 @@ def get_tiny_imagenet_mobilenet(lr=0.01, device=None):
 
     # Clasificador con una capa intermedia — más capacidad que un Linear simple
     model.classifier = nn.Sequential(
-        nn.Dropout(p=0.3),
-        nn.Linear(in_features, 512),
-        nn.ReLU(inplace=True),
+        nn.Dropout(p=0.2),
+        nn.Linear(in_features, 1024),
+        nn.LeakyReLU(inplace=True),
+        nn.Dropout(p=0.2),
+        nn.Linear(1024, 512),
+        nn.LeakyReLU(inplace=True),
         nn.Dropout(p=0.2),
         nn.Linear(512, 200),
     )
