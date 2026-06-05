@@ -1,5 +1,3 @@
-import pandas as pd
-
 from cifar10.load_data import preload_cifar10_to_ram
 from cifar10.model import cifar10_get_model
 from ddp.pickle_utils import log
@@ -20,10 +18,6 @@ class CIFAR10Worker(SyncWeightsWorker):
         self.rank = 0
         self.world_size = 1
         self.batch_size = 128
-
-        self.metrics = pd.DataFrame(
-            columns=["loss", "accuracy", "elapse", "throughput"]
-        )
 
         self._register_handlers()
 
