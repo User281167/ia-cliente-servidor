@@ -6,18 +6,10 @@ Implementación liviana usando EfficientNet-B0 preentrenado en ImageNet.
 
 - **Modelo liviano**: ~5.3M parámetros totales
 - **Parámetros entrenables**: ~1.4M (solo classifier + última capa de features)
-- **Tamaño de imagen**: 224x224
 - **Fine-tuning parcial**: Solo classifier y features.8 son entrenables
 - **Optimizador**: AdamW con weight_decay=5e-4
 - **Scheduler**: OneCycleLR con warmup
 
-## Comparación con otras arquitecturas
-
-| Modelo | Parámetros totales | Parámetros entrenables |
-|--------|-------------------|----------------------|
-| EfficientNet-B0 | ~5.3M | ~1.4M |
-| ResNet50 | ~24M | ~22.5M |
-| MobileNetV2 | ~3.5M | ~1.3M (congelado) |
 
 ## Uso
 
