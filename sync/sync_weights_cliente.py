@@ -16,7 +16,11 @@ class SyncWeightsWorker(SyncGradWorker):
         super().__init__(host, port, save_path)
 
     def train(self, seed, t0, w_global=None):
-        total_loss, total_correct, total_samples = 0.0, 0, 0
+        total_loss = torch.tensor(0.0)
+        total_correct = torch.tensor(0.0)
+        total_correct_top5 = torch.tensor(0.0)
+        total_samples = torch.tensor(0.0)
+        total_correct_top5 = 0
         n_batches = 0
 
         for X, y in self.loader:
@@ -34,11 +38,18 @@ class SyncWeightsWorker(SyncGradWorker):
             total_samples += y.size(0)
             n_batches += 1
 
+            if self.compute_top5:
+                _, pred5 = torch.topk(outputs, 5, dim=1)
+                total_correct_top5 += pred5.eq(y.view(-1, 1)).sum().item()
+
             if n_batches % 10 == 0:
                 print(
-                    f"Batch {n_batches}| "
-                    f"loss: {loss.item():.4f} | "
-                    f"acc: {total_correct / total_samples:.4f}",
+                    f"Batch {n_batches}",
+                    f"| loss: {loss.item():.4f}",
+                    f"| acc: {float(total_correct / total_samples):.4f}",
+                    f"| top5 acc: {float(total_correct_top5 / total_samples):.4f}"
+                    if self.compute_top5
+                    else "",
                     end="\r",
                 )
 
@@ -52,6 +63,7 @@ class SyncWeightsWorker(SyncGradWorker):
             for k in w_global
         }
 
+        self._last_train_top5_accuracy = (total_correct_top5 / total_samples).item()
         avg_acc = total_correct / total_samples
         avg_loss = total_loss / total_samples
 
@@ -60,11 +72,11 @@ class SyncWeightsWorker(SyncGradWorker):
 
         return (
             delta,
-            avg_loss,
-            avg_acc,
+            avg_loss.item(),
+            avg_acc.item(),
             elapse,
-            throughput,
-            total_samples,
+            throughput.item(),
+            total_samples.item(),
         )
 
     def _register_handlers(self):
@@ -95,15 +107,25 @@ class SyncWeightsWorker(SyncGradWorker):
                 seed, t0, w_global
             )
 
-            log.info(
+            top5_accuracy = getattr(self, "_last_train_top5_accuracy", 0.0)
+            eval_top5_accuracy = getattr(self, "_last_test_top5_accuracy", 0.0)
+
+            msg = (
                 f"Worker {self.rank}: epoch={epoch} | "
                 f"acc={avg_acc:.4f} | loss={avg_loss:.4f} | "
                 f"elapse={elapse:.4f} | throughput={throughput:.4f}"
             )
 
+            if self.compute_top5:
+                msg += f"| top5 acc = {top5_accuracy:.4f}"
+                msg += f"| eval top5 acc = {eval_top5_accuracy:.4f}"
+
+            log.info(msg)
+
             self.metrics.loc[len(self.metrics)] = [
                 avg_loss,
                 avg_acc,
+                top5_accuracy,
                 elapse,
                 throughput,
             ]
@@ -117,10 +139,14 @@ class SyncWeightsWorker(SyncGradWorker):
                         "samples": total_samples,
                         "loss": avg_loss,
                         "accuracy": avg_acc,
+                        "top5_accuracy": top5_accuracy,
                         # test
                         "eval_loss": eval_loss,  # suma, no promedio
                         "eval_correct": eval_correct,
                         "eval_total": eval_total,
+                        "eval_top5_correct": int(eval_top5_accuracy * eval_total)
+                        if eval_total > 0
+                        else 0,
                     },
                 },
             )

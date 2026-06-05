@@ -35,6 +35,7 @@ class AsyncGradWorker(DDPClient):
         self.batch_size = 128
         self.assignment: ShardAssignment | None = None
         self.stop = False
+        self.compute_top5 = False
 
         self.sampler = AsyncShardSampler()
         self.indexed_dataset = None
@@ -44,7 +45,7 @@ class AsyncGradWorker(DDPClient):
         self.test_loader = None
 
         self.metrics = pd.DataFrame(
-            columns=["loss", "accuracy", "elapse", "throughput"]
+            columns=["loss", "accuracy", "top5_accuracy", "elapse", "throughput"]
         )
 
         self._register_handlers()
@@ -100,6 +101,7 @@ class AsyncGradWorker(DDPClient):
         self.model.eval()
         t0 = time.perf_counter()
         test_loss, test_correct, test_total = 0.0, 0, 0
+        test_correct_top5 = 0.0
 
         indices = np.arange(len(self.test_dataset))
         self.test_indexed_dataset.set_indices(indices)
@@ -115,15 +117,24 @@ class AsyncGradWorker(DDPClient):
                 test_correct += (outputs.argmax(1) == y).sum().item()
                 test_total += y.size(0)
 
+                if self.compute_top5:
+                    _, pred5 = torch.topk(outputs, 5, dim=1)
+                    test_correct_top5 += pred5.eq(y.view(-1, 1)).sum().item()
+
                 print(
-                    f"Eval loss: {loss.item():.4f} "
-                    f"| correct: {test_correct}/{test_total}",
+                    f"Eval loss: {loss.item():.4f} ",
+                    f"| correct: {float(test_correct / test_total):.4f}",
+                    f"| top5: {float(test_correct_top5 / test_total):.4f}"
+                    if self.compute_top5
+                    else "",
                     end="\r",
                 )
 
         if test_total == 0:
+            self._last_test_top5_accuracy = 0.0
             return 0.0, 0.0, 0.0
 
+        self._last_test_top5_accuracy = test_correct_top5 / test_total
         elapsed = time.perf_counter() - t0
         return test_loss / test_total, test_correct / test_total, elapsed
 
@@ -133,6 +144,7 @@ class AsyncGradWorker(DDPClient):
 
         total_loss = torch.tensor(0.0)
         total_correct = torch.tensor(0.0)
+        total_correct_top5 = torch.tensor(0.0)
         total_samples = torch.tensor(0.0)
         n_batches = 0
 
@@ -154,17 +166,21 @@ class AsyncGradWorker(DDPClient):
             total_samples += y.size(0)
             n_batches += 1
 
+            if self.compute_top5:
+                _, pred5 = torch.topk(outputs, 5, dim=1)
+                total_correct_top5 += pred5.eq(y.view(-1, 1)).sum().item()
+
             if n_batches % 10 == 0:
                 print(
-                    f"Batch {n_batches}| "
-                    f"loss: {loss.item():.4f} | "
-                    f"acc: {total_correct / total_samples:.4f}",
-                    f" size: {y.size(0)}",
+                    f"Batch {n_batches}",
+                    f"| loss: {loss.item():.4f}",
+                    f"| acc: {float(total_correct / total_samples):.4f}",
+                    f"| top5 acc: {float(total_correct_top5 / total_samples):.4f}"
+                    if self.compute_top5
+                    else "",
+                    f"| size: {y.size(0)}",
                     end="\r",
                 )
-
-        if self.scheduler is not None:
-            self.scheduler.step()
 
         grads = {
             name: (param.grad / n_batches).detach().cpu().numpy().astype(np.float32)
@@ -173,8 +189,10 @@ class AsyncGradWorker(DDPClient):
         }
 
         if total_samples.item() == 0:
+            self._last_train_top5_accuracy = 0.0
             return grads, 0.0, 0.0, 0.0, 0
 
+        self._last_train_top5_accuracy = (total_correct_top5 / total_samples).item()
         avg_acc = total_correct / total_samples
         avg_loss = total_loss / total_samples
         elapse = time.perf_counter() - t0
@@ -197,7 +215,10 @@ class AsyncGradWorker(DDPClient):
 
         @self.on("config")
         def on_config(msg):
-            pass
+            payload = msg.get("payload", msg)
+
+            if isinstance(payload, dict):
+                self.compute_top5 = payload.get("top5", False)
 
         @self.on("metrics")
         def on_metrics(msg):
@@ -239,15 +260,23 @@ class AsyncGradWorker(DDPClient):
             t0 = time.perf_counter()
             grads, loss, accuracy, elapse, throughput, samples = self.train(t0)
 
-            log.info(
-                f"Worker: {self._worker_id} | epoch={epoch} "
+            top5_accuracy = getattr(self, "_last_train_top5_accuracy", 0.0)
+
+            msg = (
+                f"Worker: {self._worker_id} | epoch={epoch} | k={k_iter} "
                 f"| acc={accuracy:.4f} | loss={loss:.4f} "
                 f"| elapsed={elapse:.4f} | throughput={throughput:.4f}"
             )
 
+            if self.compute_top5:
+                msg += f" | top 5 acc: {top5_accuracy:.4f}"
+
+            log.info(msg)
+
             self.metrics.loc[len(self.metrics)] = [
                 loss,
                 accuracy,
+                top5_accuracy,
                 elapse,
                 throughput,
             ]
@@ -265,6 +294,7 @@ class AsyncGradWorker(DDPClient):
                         "samples": samples,
                         "loss": loss,
                         "accuracy": accuracy,
+                        "top5_accuracy": top5_accuracy,
                         "iter_sent": k_iter,
                         "shard_idx": self.assignment.shard_idx,
                     },
@@ -292,11 +322,17 @@ class AsyncGradWorker(DDPClient):
             self.model.load_state_dict(state_dict)
 
             loss, accuracy, elapsed = self.test()
+            top5_accuracy = getattr(self, "_last_test_top5_accuracy", 0.0)
 
-            log.info(
+            msg = (
                 f"Test: iter={k_iter} | loss={loss:.4f} "
                 f"| accuracy={accuracy:.4f} | elapsed={elapsed:.4f}"
             )
+
+            if self.compute_top5:
+                msg += f" | top5 accuracy={top5_accuracy:.4f}"
+
+            log.info(msg)
 
             send_msg(
                 self._sock,
@@ -307,6 +343,7 @@ class AsyncGradWorker(DDPClient):
                         "iter": k_iter,
                         "loss": loss,
                         "accuracy": accuracy,
+                        "top5_accuracy": top5_accuracy,
                         "elapsed": elapsed,
                     },
                 },

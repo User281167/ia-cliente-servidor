@@ -36,6 +36,8 @@ class SyncGradServer(DDPServer):
             }
 
         super().__init__(min_workers, config)
+        config.setdefault("top5", False)
+        self.compute_top5 = config["top5"]
         self.lr = lr
         self.batch_size = batch_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -54,8 +56,10 @@ class SyncGradServer(DDPServer):
                 "worker_res",
                 "loss",
                 "accuracy",
+                "top5_accuracy",
                 "eval_loss",
                 "eval_accuracy",
+                "eval_top5_accuracy",
                 "grad_norm",
                 "elapsed",
             ]
@@ -77,21 +81,36 @@ class SyncGradServer(DDPServer):
                 index=True,
             )
 
-        plot_grid(
-            history=[
-                (
-                    # unir train/test en una sola gráfica
-                    (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
-                    ((self.metrics["accuracy"][i], self.metrics["eval_accuracy"][i])),
-                    self.metrics["grad_norm"][i],
+        n = len(self.metrics)
+        history = []
+
+        for i in range(n):
+            row = [
+                (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
+                (self.metrics["accuracy"][i], self.metrics["eval_accuracy"][i]),
+            ]
+
+            if self.compute_top5:
+                row.append(
+                    (
+                        self.metrics["top5_accuracy"][i],
+                        self.metrics["eval_top5_accuracy"][i],
+                    )
                 )
-                for i in range(len(self.metrics))
-            ],
-            labels=[
-                ("Loss", "Train", "Test"),
-                ("Accuracy", "Train", "Test"),
-                "Grad Norm",
-            ],
+
+            row.append(self.metrics["grad_norm"][i])
+            history.append(tuple(row))
+
+        labels = [("Loss", "Train", "Test"), ("Accuracy", "Train", "Test")]
+
+        if self.compute_top5:
+            labels.append(("Top-5 Accuracy", "Train", "Test"))
+
+        labels.append("Grad Norm")
+
+        plot_grid(
+            history=history,
+            labels=labels,
             n_cols=1,
             save_path=save_path,
         )
@@ -225,13 +244,26 @@ class SyncGradServer(DDPServer):
         N = sum(r["samples"] for r in results)
         loss = sum(r["loss"] * r["samples"] for r in results) / N
         accuracy = sum(r["accuracy"] * r["samples"] for r in results) / N
+        top5_accuracy = sum(r["top5_accuracy"] * r["samples"] for r in results) / N
 
         # eval distribuido — sumar counts crudos, no promediar
         eval_total = sum(r["eval_total"] for r in results)
         eval_loss = sum(r["eval_loss"] for r in results) / eval_total
         eval_accuracy = sum(r["eval_correct"] for r in results) / eval_total
+        eval_top5_accuracy = (
+            sum(r.get("eval_top5_correct", 0) for r in results) / eval_total
+            if eval_total > 0
+            else 0.0
+        )
 
-        return loss, accuracy, eval_loss, eval_accuracy
+        return (
+            loss,
+            accuracy,
+            top5_accuracy,
+            eval_loss,
+            eval_accuracy,
+            eval_top5_accuracy,
+        )
 
     def step(self):
         """
@@ -266,7 +298,9 @@ class SyncGradServer(DDPServer):
         # result {type, payload} obtener solo el payload
         results = [r["payload"] for r in results]
 
-        loss, accuracy, eval_loss, eval_accuracy = self._aggregate_metrics(results)
+        loss, accuracy, top5_accuracy, eval_loss, eval_accuracy, eval_top5_accuracy = (
+            self._aggregate_metrics(results)
+        )
         gnorm = self._aggregate(results)
 
         elapsed = time.perf_counter() - t0
@@ -276,18 +310,26 @@ class SyncGradServer(DDPServer):
             len(results),
             loss,
             accuracy,
+            top5_accuracy,
             eval_loss,
             eval_accuracy,
+            eval_top5_accuracy,
             gnorm,
             elapsed,
         ]
 
-        log.info(
+        msg = (
             f"Epoch {self.current_epoch + 1}/{self.epochs} "
             f"| loss: {loss:.4f} | eval_loss: {eval_loss:.4f} "
-            f"| accuracy: {accuracy:.4f}  | eval_accuracy: {eval_accuracy:.4f} "
+            f"| accuracy: {accuracy:.4f} | eval_accuracy: {eval_accuracy:.4f} "
             f"| norm: {gnorm:.4f} | elapsed: {format_elapse(elapsed)}"
         )
+
+        if self.compute_top5:
+            msg += f" top5 acc: {top5_accuracy:.4f} |"
+            msg += f" test top5 acc: {eval_top5_accuracy:.4f}"
+
+        log.info(msg)
 
         self.current_epoch += 1
 

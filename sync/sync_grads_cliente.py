@@ -33,6 +33,7 @@ class SyncGradWorker(DDPClient):
         self.rank = 0
         self.world_size = 1
         self.batch_size = 128
+        self.compute_top5 = False
 
         self.sampler = None
         self.loader = None
@@ -41,9 +42,8 @@ class SyncGradWorker(DDPClient):
         self.test_loader = None
 
         self.metrics = pd.DataFrame(
-            columns=["loss", "accuracy", "elapse", "throughput"]
+            columns=["loss", "accuracy", "top5_accuracy", "elapse", "throughput"]
         )
-
         self._register_handlers()
 
     def save_metrics(self):
@@ -62,6 +62,7 @@ class SyncGradWorker(DDPClient):
         # test dataset
         self.model.eval()
         eval_loss, eval_correct, eval_total = 0.0, 0, 0
+        eval_correct_top5 = 0
 
         with torch.no_grad():
             for X, y in self.test_loader:
@@ -74,12 +75,22 @@ class SyncGradWorker(DDPClient):
                 eval_correct += (outputs.argmax(1) == y).sum().item()
                 eval_total += y.size(0)
 
+                if self.compute_top5:
+                    _, pred5 = torch.topk(outputs, 5, dim=1)
+                    eval_correct_top5 += pred5.eq(y.view(-1, 1)).sum().item()
+
                 print(
                     f"Eval loss: {loss.item():.4f} "
                     f"| correct: {eval_correct}/{eval_total}",
+                    f"| top5: {eval_correct_top5}/{eval_total}"
+                    if self.compute_top5
+                    else "",
                     end="\r",
                 )
 
+        self._last_test_top5_accuracy = (
+            eval_correct_top5 / eval_total if eval_total > 0 else 0.0
+        )
         return eval_loss, eval_correct, eval_total
 
     def train(self, seed, t0, w_global=None):
@@ -87,6 +98,7 @@ class SyncGradWorker(DDPClient):
         self.model.train()
         total_loss = torch.tensor(0.0)
         total_correct = torch.tensor(0.0)
+        total_correct_top5 = torch.tensor(0.0)
         total_samples = torch.tensor(0.0)
         n_batches = 0
 
@@ -105,11 +117,18 @@ class SyncGradWorker(DDPClient):
             total_samples += y.size(0)
             n_batches += 1
 
+            if self.compute_top5:
+                _, pred5 = torch.topk(outputs, 5, dim=1)
+                total_correct_top5 += pred5.eq(y.view(-1, 1)).sum().item()
+
             if n_batches % 10 == 0:
                 print(
-                    f"Batch {n_batches}| "
-                    f"loss: {loss.item():.4f} | "
-                    f"acc: {total_correct / total_samples:.4f}",
+                    f"Batch {n_batches}",
+                    f"| loss: {loss.item():.4f}",
+                    f"| acc: {float(total_correct / total_samples):.4f}",
+                    f"| top5 acc: {float(total_correct_top5 / total_samples):.4f}"
+                    if self.compute_top5
+                    else "",
                     end="\r",
                 )
 
@@ -122,6 +141,7 @@ class SyncGradWorker(DDPClient):
             if param.grad is not None
         }
 
+        self._last_train_top5_accuracy = (total_correct_top5 / total_samples).item()
         avg_acc = total_correct / total_samples
         avg_loss = total_loss / total_samples
 
@@ -133,7 +153,7 @@ class SyncGradWorker(DDPClient):
             avg_loss.item(),
             avg_acc.item(),
             elapse,
-            throughput,
+            throughput.item(),
             total_samples.item(),
         )
 
@@ -173,7 +193,10 @@ class SyncGradWorker(DDPClient):
 
         @self.on("config")
         def on_config(msg):
-            pass
+            payload = msg.get("payload", msg)
+
+            if isinstance(payload, dict):
+                self.compute_top5 = payload.get("top5", False)
 
         @self.on("assign")
         def on_assign(msg):
@@ -229,15 +252,25 @@ class SyncGradWorker(DDPClient):
                 seed, t0
             )
 
-            log.info(
+            top5_accuracy = getattr(self, "_last_train_top5_accuracy", 0.0)
+            eval_top5_accuracy = getattr(self, "_last_test_top5_accuracy", 0.0)
+
+            msg = (
                 f"Worker {self.rank}: epoch={epoch} | "
                 f"acc={avg_acc:.4f} | loss={avg_loss:.4f} | "
                 f"elapse={elapse:.4f} | throughput={throughput:.4f}"
             )
 
+            if self.compute_top5:
+                msg += f" top5 acc: {top5_accuracy:.4f} |"
+                msg += f" test top5 acc: {eval_top5_accuracy:.4f}"
+
+            log.info(msg)
+
             self.metrics.loc[len(self.metrics)] = [
                 avg_loss,
                 avg_acc,
+                top5_accuracy,
                 elapse,
                 throughput,
             ]
@@ -251,10 +284,14 @@ class SyncGradWorker(DDPClient):
                         "samples": total_samples,
                         "loss": avg_loss,
                         "accuracy": avg_acc,
+                        "top5_accuracy": top5_accuracy,
                         # test
                         "eval_loss": eval_loss,  # suma, no promedio
                         "eval_correct": eval_correct,
                         "eval_total": eval_total,
+                        "eval_top5_correct": int(eval_top5_accuracy * eval_total)
+                        if eval_total > 0
+                        else 0,
                     },
                 },
             )

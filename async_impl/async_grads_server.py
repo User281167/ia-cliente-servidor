@@ -48,6 +48,9 @@ class AsyncGradServer(DDPAsyncServer):
                 "batch_size": batch_size,
             }
 
+        config.setdefault("top5", False)
+        self.compute_top5 = config["top5"]
+
         super().__init__(min_workers=min_workers, worker_config=config)
 
         self.lr = lr
@@ -71,6 +74,7 @@ class AsyncGradServer(DDPAsyncServer):
             columns=[
                 "loss",
                 "accuracy",
+                "top5_accuracy",
                 "grad_norm",
                 "staleness",
                 "gamma",
@@ -78,7 +82,14 @@ class AsyncGradServer(DDPAsyncServer):
             ]
         )
         self.test_metrics = pd.DataFrame(
-            columns=["iter", "worker_id", "loss", "accuracy", "elapsed"]
+            columns=[
+                "iter",
+                "worker_id",
+                "loss",
+                "accuracy",
+                "top5_accuracy",
+                "elapsed",
+            ]
         )
 
         self._register_event_handlers()
@@ -238,6 +249,7 @@ class AsyncGradServer(DDPAsyncServer):
             samples = payload.get("samples", 0)
             loss = payload.get("loss", float("nan"))
             accuracy = payload.get("accuracy", float("nan"))
+            top5_accuracy = payload.get("top5_accuracy", float("nan"))
             iter_sent = payload.get("iter_sent", self.k)
             shard_idx = payload.get("shard_idx", None)
 
@@ -261,6 +273,7 @@ class AsyncGradServer(DDPAsyncServer):
                     self.metrics.loc[len(self.metrics)] = [
                         loss,
                         accuracy,
+                        top5_accuracy,
                         grad_norm,
                         staleness,
                         gamma,
@@ -276,12 +289,17 @@ class AsyncGradServer(DDPAsyncServer):
                 self._scheduler.complete(wid, shard_idx)
 
             if k_now % 10 == 0 and staleness <= self.max_staleness:
-                log.info(
-                    f"[k={k_now}] epoch={self._scheduler.current_epoch}/{self.epochs} "
-                    f"worker={wid} staleness={staleness} gamma={gamma:.6f} "
-                    f"samples={samples} loss={loss:.4f} accuracy={accuracy:.4f} "
-                    f"grad_norm={grad_norm:.4f}"
+                txt = (
+                    f"[k={k_now}] epoch={self._scheduler.current_epoch}/{self.epochs}"
+                    f" | worker={wid} | staleness={staleness} | gamma={gamma:.6f} "
+                    f" | samples={samples} | loss={loss:.4f} | accuracy={accuracy:.4f} "
+                    f" | grad_norm={grad_norm:.4f}"
                 )
+
+                if self.compute_top5:
+                    txt += f" | top5={top5_accuracy:.4f} "
+
+                log.info(txt)
 
         @self.on("test_result")
         def _handle_test_result(msg: dict) -> None:
@@ -293,15 +311,21 @@ class AsyncGradServer(DDPAsyncServer):
                 wid,
                 payload.get("loss", float("nan")),
                 payload.get("accuracy", float("nan")),
+                payload.get("top5_accuracy", float("nan")),
                 payload.get("elapsed", float("nan")),
             ]
 
-            log.info(
-                f"[test k={payload.get('iter', self.k)}] worker={wid} "
-                f"loss={payload.get('loss', float('nan')):.4f} "
-                f"accuracy={payload.get('accuracy', float('nan')):.4f} "
+            txt = (
+                f"[test k={payload.get('iter', self.k)}]: | worker={wid} | "
+                f"loss={payload.get('loss', float('nan')):.4f} | "
+                f"accuracy={payload.get('accuracy', float('nan')):.4f} | "
                 f"elapsed={payload.get('elapsed', float('nan')):.4f}"
             )
+
+            if self.compute_top5:
+                txt += f" | top5 acc={payload.get('top5_accuracy', float('nan')):.4f}"
+
+            log.info(txt)
 
             with self._k_lock:
                 k_new = self.k + 1
@@ -346,41 +370,47 @@ class AsyncGradServer(DDPAsyncServer):
                 os.path.join(save_path, "description_server.xlsx"), index=True
             )
 
+        n = len(self.metrics)
+        train_labels = ["Loss", "Accuracy"]
         history = [
-            (
-                self.metrics["loss"][i],
-                self.metrics["accuracy"][i],
-                self.metrics["grad_norm"][i],
-            )
-            for i in range(len(self.metrics))
+            [self.metrics["loss"][i], self.metrics["accuracy"][i]] for i in range(n)
         ]
 
+        if self.compute_top5:
+            train_labels.append("Top-5 Accuracy")
+
+            for i in range(n):
+                history[i].append(self.metrics["top5_accuracy"][i])
+
+        train_labels.append("Grad Norm")
+
+        for i in range(n):
+            history[i].append(self.metrics["grad_norm"][i])
+
         plot_grid(
-            history=history,
-            labels=[
-                "Loss",
-                "Accuracy",
-                "Grad Norm",
-            ],
+            history=[tuple(row) for row in history],
+            labels=train_labels,
             n_cols=1,
             save_path=save_path,
             x_label="Iteration",
         )
 
-        history = [
-            (
-                self.test_metrics["loss"][i],
-                self.test_metrics["accuracy"][i],
-            )
-            for i in range(len(self.test_metrics))
+        n_test = len(self.test_metrics)
+        test_labels = ["Loss", "Accuracy"]
+        test_history = [
+            [self.test_metrics["loss"][i], self.test_metrics["accuracy"][i]]
+            for i in range(n_test)
         ]
 
+        if self.compute_top5:
+            test_labels.append("Top-5 Accuracy")
+
+            for i in range(n_test):
+                test_history[i].append(self.test_metrics["top5_accuracy"][i])
+
         plot_grid(
-            history=history,
-            labels=[
-                "Loss",
-                "Accuracy",
-            ],
+            history=[tuple(row) for row in test_history],
+            labels=test_labels,
             n_cols=1,
             save_path=save_path,
             x_label="Iteration",

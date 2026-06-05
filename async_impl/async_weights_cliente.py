@@ -20,6 +20,7 @@ class AsyncWeightsWorker(AsyncGradWorker):
 
         total_loss = torch.tensor(0.0)
         total_correct = torch.tensor(0.0)
+        total_correct_top5 = torch.tensor(0.0)
         total_samples = torch.tensor(0.0)
         n_batches = 0
 
@@ -41,12 +42,19 @@ class AsyncWeightsWorker(AsyncGradWorker):
             total_samples += y.size(0)
             n_batches += 1
 
+            if self.compute_top5:
+                _, pred5 = torch.topk(outputs, 5, dim=1)
+                total_correct_top5 += pred5.eq(y.view(-1, 1)).sum().item()
+
             if n_batches % 10 == 0:
                 print(
-                    f"Batch {n_batches}| "
-                    f"loss: {loss.item():.4f} | "
-                    f"acc: {total_correct / total_samples:.4f}",
-                    f" size: {y.size(0)}",
+                    f"Batch {n_batches}",
+                    f"| loss: {loss.item():.4f}",
+                    f"| acc: {float(total_correct / total_samples):.4f}",
+                    f"| top5 acc: {float(total_correct_top5 / total_samples):.4f}"
+                    if self.compute_top5
+                    else "",
+                    f"| size: {y.size(0)}",
                     end="\r",
                 )
 
@@ -60,8 +68,10 @@ class AsyncWeightsWorker(AsyncGradWorker):
         }
 
         if total_samples.item() == 0:
+            self._last_train_top5_accuracy = 0.0
             return delta, 0.0, 0.0, 0.0, 0.0, 0
 
+        self._last_train_top5_accuracy = (total_correct_top5 / total_samples).item()
         avg_acc = total_correct / total_samples
         avg_loss = total_loss / total_samples
         elapse = time.perf_counter() - t0
@@ -110,15 +120,23 @@ class AsyncWeightsWorker(AsyncGradWorker):
                 w_global,
             )
 
-            log.info(
+            top5_accuracy = getattr(self, "_last_train_top5_accuracy", 0.0)
+
+            txt = (
                 f"Worker: {self._worker_id} | epoch={epoch} "
                 f"| acc={accuracy:.4f} | loss={loss:.4f} "
                 f"| elapsed={elapse:.4f} | throughput={throughput:.4f}"
             )
 
+            if self.compute_top5:
+                txt += f"| top5 acc={top5_accuracy:.4f}"
+
+            log.info(txt)
+
             self.metrics.loc[len(self.metrics)] = [
                 loss,
                 accuracy,
+                top5_accuracy,
                 elapse,
                 throughput,
             ]
@@ -136,6 +154,7 @@ class AsyncWeightsWorker(AsyncGradWorker):
                         "samples": samples,
                         "loss": loss,
                         "accuracy": accuracy,
+                        "top5_accuracy": top5_accuracy,
                         "iter_sent": k_iter,
                         "shard_idx": self.assignment.shard_idx,
                     },

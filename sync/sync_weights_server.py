@@ -45,8 +45,10 @@ class SyncWeightsServer(SyncGradServer):
                 "worker_res",
                 "loss",
                 "accuracy",
+                "top5_accuracy",
                 "eval_loss",
                 "eval_accuracy",
+                "eval_top5_accuracy",
                 "delta_norm",
                 "elapsed",
             ]
@@ -68,21 +70,36 @@ class SyncWeightsServer(SyncGradServer):
                 index=True,
             )
 
-        plot_grid(
-            history=[
-                (
-                    # unir train/test en una sola gráfica
-                    (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
-                    ((self.metrics["accuracy"][i], self.metrics["eval_accuracy"][i])),
-                    self.metrics["delta_norm"][i],
+        n = len(self.metrics)
+        history = []
+
+        for i in range(n):
+            row = [
+                (self.metrics["loss"][i], self.metrics["eval_loss"][i]),
+                (self.metrics["accuracy"][i], self.metrics["eval_accuracy"][i]),
+            ]
+
+            if self.compute_top5:
+                row.append(
+                    (
+                        self.metrics["top5_accuracy"][i],
+                        self.metrics["eval_top5_accuracy"][i],
+                    )
                 )
-                for i in range(len(self.metrics))
-            ],
-            labels=[
-                ("Loss", "Train", "Test"),
-                ("Accuracy", "Train", "Test"),
-                "Weights Norm",
-            ],
+
+            row.append(self.metrics["delta_norm"][i])
+            history.append(tuple(row))
+
+        labels = [("Loss", "Train", "Test"), ("Accuracy", "Train", "Test")]
+
+        if self.compute_top5:
+            labels.append(("Top-5 Accuracy", "Train", "Test"))
+
+        labels.append("Weights Norm")
+
+        plot_grid(
+            history=history,
+            labels=labels,
             n_cols=1,
             save_path=save_path,
         )

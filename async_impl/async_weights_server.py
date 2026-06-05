@@ -55,6 +55,7 @@ class AsyncWeightsServer(AsyncGradServer):
             columns=[
                 "loss",
                 "accuracy",
+                "top5_accuracy",
                 "delta_norm",
                 "staleness",
                 "gamma",
@@ -97,6 +98,7 @@ class AsyncWeightsServer(AsyncGradServer):
             samples = payload.get("samples", 0)
             loss = payload.get("loss", float("nan"))
             accuracy = payload.get("accuracy", float("nan"))
+            top5_accuracy = payload.get("top5_accuracy", float("nan"))
             iter_sent = payload.get("iter_sent", self.k)
             shard_idx = payload.get("shard_idx", None)
 
@@ -120,6 +122,7 @@ class AsyncWeightsServer(AsyncGradServer):
                     self.metrics.loc[len(self.metrics)] = [
                         loss,
                         accuracy,
+                        top5_accuracy,
                         delta_norm,
                         staleness,
                         gamma,
@@ -135,12 +138,17 @@ class AsyncWeightsServer(AsyncGradServer):
                 self._scheduler.complete(wid, shard_idx)
 
             if k_now % 10 == 0 and staleness <= self.max_staleness:
-                log.info(
-                    f"[k={k_now}] epoch={self._scheduler.current_epoch}/{self.epochs} "
-                    f"worker={wid} staleness={staleness} gamma={gamma:.6f} "
-                    f"samples={samples} loss={loss:.4f} accuracy={accuracy:.4f} "
+                txt = (
+                    f"[k={k_now}]: | epoch={self._scheduler.current_epoch}/{self.epochs} | "
+                    f"worker={wid} | staleness={staleness} | gamma={gamma:.6f} | "
+                    f"samples={samples} | loss={loss:.4f} accuracy={accuracy:.4f} | "
                     f"delta_norm={delta_norm:.4f}"
                 )
+
+                if self.compute_top5:
+                    txt += f" top5_acc={top5_accuracy:.4f}"
+
+                log.info(txt)
 
     def results(self) -> None:
         save_path = self.save_path
@@ -156,41 +164,46 @@ class AsyncWeightsServer(AsyncGradServer):
                 os.path.join(save_path, "description_server.xlsx"), index=True
             )
 
+        n = len(self.metrics)
+        train_labels = ["Loss", "Accuracy"]
         history = [
-            (
-                self.metrics["loss"][i],
-                self.metrics["accuracy"][i],
-                self.metrics["delta_norm"][i],
-            )
-            for i in range(len(self.metrics))
+            [self.metrics["loss"][i], self.metrics["accuracy"][i]] for i in range(n)
         ]
 
+        if self.compute_top5:
+            train_labels.append("Top-5 Accuracy")
+            for i in range(n):
+                history[i].append(self.metrics["top5_accuracy"][i])
+
+        train_labels.append("Delta Norm")
+
+        for i in range(n):
+            history[i].append(self.metrics["delta_norm"][i])
+
         plot_grid(
-            history=history,
-            labels=[
-                "Loss",
-                "Accuracy",
-                "Delta Norm",
-            ],
+            history=[tuple(row) for row in history],
+            labels=train_labels,
             n_cols=1,
             save_path=save_path,
             x_label="Iteration",
         )
 
-        history = [
-            (
-                self.test_metrics["loss"][i],
-                self.test_metrics["accuracy"][i],
-            )
-            for i in range(len(self.test_metrics))
+        n_test = len(self.test_metrics)
+        test_labels = ["Loss", "Accuracy"]
+        test_history = [
+            [self.test_metrics["loss"][i], self.test_metrics["accuracy"][i]]
+            for i in range(n_test)
         ]
 
+        if self.compute_top5:
+            test_labels.append("Top-5 Accuracy")
+
+            for i in range(n_test):
+                test_history[i].append(self.test_metrics["top5_accuracy"][i])
+
         plot_grid(
-            history=history,
-            labels=[
-                "Loss",
-                "Accuracy",
-            ],
+            history=[tuple(row) for row in test_history],
+            labels=test_labels,
             n_cols=1,
             save_path=save_path,
             x_label="Iteration",
