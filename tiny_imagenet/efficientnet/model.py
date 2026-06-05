@@ -18,12 +18,12 @@ def efficientnet_transform(train=True):
             [
                 # transforms.Resize(140),
                 # transforms.RandomCrop(128),
-                # transforms.RandomHorizontalFlip(), # 1s
+                # transforms.RandomHorizontalFlip(),
                 # transforms.ColorJitter(
                 #     brightness=0.2, contrast=0.2, saturation=0.2
-                # ),  # 3s
-                # transforms.RandomRotation(10),  # rotación leve 1s
-                # transforms.RandomGrayscale(p=0.05),  # grayscale ocasional 0.3s
+                # ),
+                # transforms.RandomRotation(10),  # rotación leve
+                # transforms.RandomGrayscale(p=0.05),  # grayscale ocasional
                 transforms.ToTensor(),
                 transforms.Normalize(EFFICIENTNET_MEAN, EFFICIENTNET_STD),
             ]

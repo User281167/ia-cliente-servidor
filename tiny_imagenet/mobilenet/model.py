@@ -17,14 +17,14 @@ def mobilenet_transform(train=True):
     if train:
         return transforms.Compose(
             [
-                transforms.Resize(70),  # ligeramente mayor para crop
-                transforms.RandomCrop(64),  # crop aleatorio
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(
-                    brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
-                ),
-                transforms.RandomRotation(10),  # rotación leve
-                transforms.RandomGrayscale(p=0.05),  # grayscale ocasional
+                # transforms.Resize(70),  # ligeramente mayor para crop
+                # transforms.RandomCrop(64),  # crop aleatorio
+                # transforms.RandomHorizontalFlip(),
+                # transforms.ColorJitter(
+                #     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1
+                # ),
+                # transforms.RandomRotation(10),  # rotación leve
+                # transforms.RandomGrayscale(p=0.05),  # grayscale ocasional
                 transforms.ToTensor(),
                 transforms.Normalize(MOBILENET_MEAN, MOBILENET_STD),
             ]
@@ -32,7 +32,7 @@ def mobilenet_transform(train=True):
     else:
         return transforms.Compose(
             [
-                transforms.Resize((64, 64)),
+                # transforms.Resize((64, 64)),
                 transforms.ToTensor(),
                 transforms.Normalize(MOBILENET_MEAN, MOBILENET_STD),
             ]

@@ -27,6 +27,7 @@ class TinyImageNetServer(SyncWeightsServer):
             "epochs": epochs,
             "lr": lr,
             "batch_size": batch_size,
+            "top5": True,
         }
 
         super().__init__(

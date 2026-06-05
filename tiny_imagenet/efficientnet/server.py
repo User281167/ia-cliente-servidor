@@ -1,9 +1,8 @@
 import os
 
-import torch
 from torch.utils.data import DataLoader
 
-from async_impl import AsyncGradServer, AsyncWeightsServer
+from async_impl import AsyncGradServer
 from tiny_imagenet.efficientnet.model import (
     efficientnet_transform,
     get_tiny_imagenet_efficientnet,
@@ -28,6 +27,7 @@ class EfficientNetServer(AsyncGradServer):
             "epochs": epochs,
             "lr": lr,
             "batch_size": batch_size,
+            "top5": True,
         }
 
         self.weight_decay = 5e-4
@@ -59,7 +59,7 @@ class EfficientNetServer(AsyncGradServer):
             test_dataset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=4,
+            num_workers=2,
             pin_memory=True,
         )
 
@@ -74,32 +74,3 @@ class EfficientNetServer(AsyncGradServer):
 
             with open(os.path.join(save_path, "train_params.txt"), "a") as f:
                 f.write(f"final_accuracy: {acc}\n")
-
-    # def _apply_delta(self, delta: dict, gamma: float) -> float:
-    #     state = self.model.state_dict()
-    #     delta_norm_sq = 0.0
-
-    #     for name, value in delta.items():
-    #         if name not in state:
-    #             continue
-
-    #         d_t = torch.as_tensor(
-    #             value,
-    #             dtype=state[name].dtype,
-    #             device=state[name].device,
-    #         )
-
-    #         if (
-    #             self.weight_decay > 0
-    #             and "weight" in name
-    #             and "bn" not in name
-    #             and "bias" not in name
-    #         ):
-    #             state[name] = state[name] * (1 - self.weight_decay) + gamma * d_t
-    #         else:
-    #             state[name] = state[name] + gamma * d_t
-
-    #         delta_norm_sq += torch.linalg.vector_norm(d_t.float()).item() ** 2
-
-    #     self.model.load_state_dict(state)
-    #     return delta_norm_sq**0.5

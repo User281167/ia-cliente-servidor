@@ -203,11 +203,11 @@ def excel_report(per_class_acc, conf, loader, save_path):
     """
     dataset = loader.dataset
 
-    # unwrap Subset
     if isinstance(dataset, Subset):
         dataset = dataset.dataset
     if isinstance(dataset, TinyImageNetLazy):
         dataset = dataset.hf_dataset
+
     label_names = dataset.features["label"].names
 
     img_dir = os.path.join(save_path, "img")

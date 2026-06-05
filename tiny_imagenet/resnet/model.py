@@ -12,14 +12,14 @@ def resnet_transform(train=True):
     if train:
         return transforms.Compose(
             [
-                transforms.Resize(
-                    256
-                ),  # Redimensionar a 256 para luego hacer RandomCrop a 224
-                transforms.RandomCrop(224),  # ResNet fue preentrenado en 224x224
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(
-                    brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
-                ),
+                # transforms.Resize(
+                #     256
+                # ),  # Redimensionar a 256 para luego hacer RandomCrop a 224
+                # transforms.RandomCrop(224),  # ResNet fue preentrenado en 224x224
+                # transforms.RandomHorizontalFlip(),
+                # transforms.ColorJitter(
+                #     brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
+                # ),
                 transforms.ToTensor(),
                 transforms.Normalize(RESNET_MEAN, RESNET_STD),
             ]
@@ -27,7 +27,7 @@ def resnet_transform(train=True):
     else:
         return transforms.Compose(
             [
-                transforms.Resize((224, 224)),
+                # transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 transforms.Normalize(RESNET_MEAN, RESNET_STD),
             ]

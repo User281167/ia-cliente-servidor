@@ -28,6 +28,7 @@ class ResNetServer(AsyncWeightsServer):
             "epochs": epochs,
             "lr": lr,
             "batch_size": batch_size,
+            "top5": True,
         }
 
         self.weight_decay = 5e-4

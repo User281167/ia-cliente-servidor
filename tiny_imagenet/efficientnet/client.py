@@ -1,4 +1,4 @@
-from async_impl import AsyncGradWorker, AsyncWeightsWorker
+from async_impl import AsyncGradWorker
 from ddp.pickle_utils import log, send_msg
 from tiny_imagenet.efficientnet.model import (
     efficientnet_transform,
@@ -18,6 +18,7 @@ class EfficientNetWorker(AsyncGradWorker):
             payload = msg["payload"]
             lr = payload["lr"]
             self.batch_size = payload["batch_size"]
+            self.compute_top5 = payload.get("top5", False)
 
             self.model, self.criterion, self.optimizer, self.scheduler = (
                 get_tiny_imagenet_efficientnet(lr=lr, device=self.device)

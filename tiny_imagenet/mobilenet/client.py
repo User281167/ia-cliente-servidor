@@ -18,6 +18,7 @@ class MobileNetWorker(AsyncGradWorker):
             payload = msg["payload"]
             lr = payload["lr"]
             self.batch_size = payload["batch_size"]
+            self.compute_top5 = payload.get("top5", False)
 
             self.model, self.criterion, self.optimizer, self.scheduler = (
                 get_tiny_imagenet_mobilenet(lr=lr, device=self.device)

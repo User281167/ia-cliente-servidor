@@ -20,7 +20,7 @@ Implementación mejorada usando ResNet50 preentrenado en ImageNet.
 python -m tiny_imagenet.resnet.train --epochs 20 --batch-size 64 --lr 0.001 --save ./results
 
 # Worker
-python -m tiny_imagenet.resnet.train --worker --host localhost --port 9090 --save ./results
+python -m tiny_imagenet.resnet.train --worker --host localhost --save ./results
 ```
 
 ## Parametros recomendados
@@ -30,3 +30,4 @@ python -m tiny_imagenet.resnet.train --worker --host localhost --port 9090 --sav
 - `--epochs`: 20-30
 - `--test-each`: 5 (evaluar cada 5 epochs)
 - `--shard-size`: 5000 (tamaño de cada shard para workers)
+- `--port`: 9090

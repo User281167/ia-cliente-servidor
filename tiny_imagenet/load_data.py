@@ -1,5 +1,8 @@
-import torchvision.transforms as transforms
 from datasets import load_dataset
+
+# problema importanto primero torchvision que datasets con las versiones actuales
+print("", end="")
+import torchvision.transforms as transforms
 from PIL import Image
 from torch.utils.data import Dataset
 
@@ -11,6 +14,8 @@ class TinyImageNetLazy(Dataset):
             split=split,
             keep_in_memory=False,
         )
+
+        self.hf_dataset = hf_dataset
 
         # Precargar todo en listas Python (RAM) — ~500MB train, ~50MB val
         # Esto elimina el I/O de Arrow en cada __getitem__
