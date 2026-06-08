@@ -1,6 +1,7 @@
 import os
 import shutil
 
+import numpy as np
 import pandas as pd
 import torch
 from openpyxl import Workbook
@@ -10,6 +11,89 @@ from torch.utils.data import Subset
 
 from tiny_imagenet.load_data import TinyImageNetLazy
 from tiny_imagenet.utils.wnids import tiny_imagenet_classes
+
+
+def compute_confusion_matrix_and_accuracy(model, loader, num_classes, device=None):
+    """
+    Calcula matriz de confusión, accuracy global, accuracy por clase
+    y top-5 accuracy por clase usando únicamente tensores de PyTorch.
+
+    Args:
+        model: Modelo de PyTorch.
+        loader: DataLoader.
+        num_classes: Número de clases.
+        device: 'cpu' o 'cuda'.
+
+    Returns:
+        acc: Accuracy global (float)
+        conf: Tensor (num_classes, num_classes)
+        per_class_acc: Tensor (num_classes,)
+        per_class_top5_acc: Tensor (num_classes,)
+    """
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model.eval()
+
+    correct = 0
+    total = 0
+
+    conf = torch.zeros((num_classes, num_classes), dtype=torch.int64, device=device)
+    per_class_correct = torch.zeros(num_classes, dtype=torch.int64, device=device)
+    per_class_total = torch.zeros(num_classes, dtype=torch.int64, device=device)
+    per_class_top5_correct = torch.zeros(num_classes, dtype=torch.int64, device=device)
+
+    with torch.no_grad():
+        for X, y in loader:
+            X = X.to(device)
+            y = y.to(device)
+
+            outputs = model(X)
+
+            preds = outputs.argmax(dim=1)
+            _, pred5 = outputs.topk(5, dim=1)
+
+            # Accuracy global
+            correct += (preds == y).sum()
+            total += y.size(0)
+
+            # Matriz de confusión
+            conf.index_put_(
+                (y, preds), torch.ones_like(y, dtype=torch.int64), accumulate=True
+            )
+
+            # Total por clase
+            per_class_total.index_put_(
+                (y,), torch.ones_like(y, dtype=torch.int64), accumulate=True
+            )
+
+            # Correctos top-1
+            mask_top1 = preds == y
+            if mask_top1.any():
+                per_class_correct.index_put_(
+                    (y[mask_top1],),
+                    torch.ones_like(y[mask_top1], dtype=torch.int64),
+                    accumulate=True,
+                )
+
+            # Correctos top-5
+            mask_top5 = (pred5 == y.unsqueeze(1)).any(dim=1)
+            if mask_top5.any():
+                per_class_top5_correct.index_put_(
+                    (y[mask_top5],),
+                    torch.ones_like(y[mask_top5], dtype=torch.int64),
+                    accumulate=True,
+                )
+
+    per_class_acc = per_class_correct.float() / per_class_total.clamp(min=1).float()
+    per_class_top5_acc = (
+        per_class_top5_correct.float() / per_class_total.clamp(min=1).float()
+    )
+
+    acc = (correct.float() / total).item() if total > 0 else 0.0
+
+    return acc, conf, per_class_acc, per_class_top5_acc
 
 
 def clean_name(name: str):
@@ -58,7 +142,9 @@ def extract_images_per_class(save_path, hf_dataset):
     print(f"Guardadas {len(saved)} clases en {save_path}")
 
 
-def save_class_report(per_class_acc, conf, label_names, save_path):
+def save_class_report(
+    per_class_acc, conf, label_names, save_path, per_class_top5_acc=None
+):
     """
     Guardar un informe de las clases en un excel.
     Ordenar clases por precisión descendente.
@@ -77,6 +163,11 @@ def save_class_report(per_class_acc, conf, label_names, save_path):
 
     for cls in sorted_idx.tolist():
         acc = per_class_acc[cls].item()
+
+        # Obtener top5 accuracy para esta clase
+        top5_acc = None
+        if per_class_top5_acc is not None:
+            top5_acc = float(per_class_top5_acc[cls])
 
         row_conf = conf[cls].clone()
         row_conf[cls] = 0
@@ -102,6 +193,7 @@ def save_class_report(per_class_acc, conf, label_names, save_path):
             {
                 "class_name": classes.get(class_name, class_name),
                 "accuracy": acc,
+                "top5_accuracy": top5_acc,
                 "top_confused_class": classes.get(
                     top_confused_class, top_confused_class
                 ),
@@ -148,12 +240,12 @@ def export_to_excel(df, save_path, img_dir):
     # STYLE: columnas
     # -------------------------
     # columnas A-E
-    for col in ["A", "B", "C", "D", "E", "F"]:
+    for col in ["A", "B", "C", "D", "E", "F", "G"]:
         ws.column_dimensions[col].width = 20
 
     # columnas de imagen (más anchas)
-    ws.column_dimensions["E"].width = 18
     ws.column_dimensions["F"].width = 18
+    ws.column_dimensions["G"].width = 18
 
     # -------------------------
     # INSERT IMAGES + ROW HEIGHT
@@ -170,7 +262,7 @@ def export_to_excel(df, save_path, img_dir):
             img = XLImage(img_path)
             img.width = 64
             img.height = 64
-            ws.add_image(img, f"E{excel_row}")
+            ws.add_image(img, f"F{excel_row}")
 
         # -------- imagen confundida --------
         if row["img_confused"] is not None:
@@ -180,7 +272,7 @@ def export_to_excel(df, save_path, img_dir):
                 img2 = XLImage(img_conf_path)
                 img2.width = 64
                 img2.height = 64
-                ws.add_image(img2, f"F{excel_row}")
+                ws.add_image(img2, f"G{excel_row}")
 
     # -------------------------
     # SAVE
@@ -191,7 +283,7 @@ def export_to_excel(df, save_path, img_dir):
     print(f"Excel guardado en: {output_file}")
 
 
-def excel_report(per_class_acc, conf, loader, save_path):
+def excel_report(per_class_acc, conf, loader, save_path, per_class_top5_acc=None):
     """
     Generar un informe de clases en formato Excel.
 
@@ -215,7 +307,9 @@ def excel_report(per_class_acc, conf, loader, save_path):
     if not os.path.exists(img_dir):
         extract_images_per_class(img_dir, dataset)
 
-    df = save_class_report(per_class_acc, conf, label_names, save_path)
+    df = save_class_report(
+        per_class_acc, conf, label_names, save_path, per_class_top5_acc
+    )
     export_to_excel(df, save_path, img_dir)
 
     # remove img

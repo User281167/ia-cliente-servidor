@@ -9,7 +9,10 @@ from tiny_imagenet.resnet.model import (
     get_tiny_imagenet_resnet,
     resnet_transform,
 )
-from tiny_imagenet.utils.report import excel_report
+from tiny_imagenet.utils.report import (
+    compute_confusion_matrix_and_accuracy,
+    excel_report,
+)
 
 
 class ResNetServer(AsyncWeightsServer):
@@ -67,9 +70,19 @@ class ResNetServer(AsyncWeightsServer):
 
         save_path = self.save_path
         if save_path:
-            acc, conf = self.evaluate_classification(num_classes=200)
-            per_class_acc = conf.diag() / conf.sum(dim=1).clamp(min=1)
-            excel_report(per_class_acc, conf, self.test_loader, save_path)
+            acc, conf, per_class_acc, per_class_top5_acc = (
+                compute_confusion_matrix_and_accuracy(
+                    self.model, self.test_loader, num_classes=200, device=self.device
+                )
+            )
+
+            excel_report(
+                per_class_acc,
+                conf,
+                self.test_loader,
+                save_path,
+                per_class_top5_acc=per_class_top5_acc,
+            )
 
             with open(os.path.join(save_path, "train_params.txt"), "a") as f:
                 f.write(f"final_accuracy: {acc}\n")

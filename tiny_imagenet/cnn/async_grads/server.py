@@ -1,6 +1,10 @@
 import os
 
 from async_impl import AsyncGradServer
+from tiny_imagenet.utils.report import (
+    compute_confusion_matrix_and_accuracy,
+    excel_report,
+)
 
 from .model import get_tiny_imagenet_model
 
@@ -61,3 +65,17 @@ class TinyImageNetServer(AsyncGradServer):
         if self.save_path:
             path = os.path.join(self.save_path, "model.pth")
             self.model.save(path)
+
+            acc, conf, per_class_acc, per_class_top5_acc = (
+                compute_confusion_matrix_and_accuracy(
+                    self.model, self.test_loader, num_classes=200, device=self.device
+                )
+            )
+
+            excel_report(
+                per_class_acc,
+                conf,
+                self.test_loader,
+                self.save_path,
+                per_class_top5_acc=per_class_top5_acc,
+            )
