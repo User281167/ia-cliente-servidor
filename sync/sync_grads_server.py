@@ -273,8 +273,11 @@ class SyncGradServer(DDPServer):
         """
         n_workers = self._wait_and_register_workers()
 
-        if n_workers is None:
-            log.warning("Timeout esperando workers (saltar época)")
+        if n_workers < self.min_workers:
+            print(
+                f"Timeout esperando {n_workers}/{self.min_workers} workers (saltar época)",
+                end="\r",
+            )
             return
 
         t0 = time.perf_counter()
@@ -293,6 +296,11 @@ class SyncGradServer(DDPServer):
 
         if not results:
             log.warning("No se recibieron resultados, saltando época")
+            return
+        if len(results) < self.min_workers:
+            log.warning(
+                f"No se recibieron suficientes resultados {len(results)}/{self.min_workers}, saltando época"
+            )
             return
 
         # result {type, payload} obtener solo el payload
