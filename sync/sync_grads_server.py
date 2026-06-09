@@ -265,6 +265,13 @@ class SyncGradServer(DDPServer):
             eval_top5_accuracy,
         )
 
+    def get_weights(self):
+        """Devuelve los pesos actuales del modelo como un diccionario de numpy arrays."""
+        return {
+            k: v.detach().cpu().numpy().astype(np.float32)
+            for k, v in self.model.state_dict().items()
+        }
+
     def step(self):
         """
         Ejecuta un paso de entrenamiento distribuido.
@@ -284,10 +291,7 @@ class SyncGradServer(DDPServer):
         self.current_workers = n_workers
 
         # pesos y parámetros del modelo en pytorch
-        state = {
-            k: v.detach().cpu().numpy().astype(np.float32)
-            for k, v in self.model.state_dict().items()
-        }
+        state = self.get_weights()
 
         self._broadcast_weights(state)
         self._send_assign(n_workers, self.current_epoch)

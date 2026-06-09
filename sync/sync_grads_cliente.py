@@ -93,6 +93,13 @@ class SyncGradWorker(DDPClient):
         )
         return eval_loss, eval_correct, eval_total
 
+    def get_grads(self):
+        return {
+            name: param.grad.detach().cpu().numpy().astype(np.float32)
+            for name, param in self.model.named_parameters()
+            if param.grad is not None
+        }
+
     def train(self, seed, t0, w_global=None):
         # train
         self.model.train()
@@ -135,11 +142,7 @@ class SyncGradWorker(DDPClient):
         if self.scheduler is not None:
             self.scheduler.step()
 
-        grads = {
-            name: param.grad.detach().cpu().numpy().astype(np.float32)
-            for name, param in self.model.named_parameters()
-            if param.grad is not None
-        }
+        grads = self.get_grads()
 
         self._last_train_top5_accuracy = (total_correct_top5 / total_samples).item()
         avg_acc = total_correct / total_samples

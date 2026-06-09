@@ -14,6 +14,12 @@ class AsyncWeightsWorker(AsyncGradWorker):
     delta = w_local - w_global.
     """
 
+    def get_delta(self, w_local, w_global):
+        return {
+            k: (w_local[k] - w_global[k]).detach().cpu().numpy().astype(np.float32)
+            for k in w_global
+        }
+
     def train(self, t0, w_global):
         self._ensure_loaders()
         self.model.train()
@@ -62,10 +68,7 @@ class AsyncWeightsWorker(AsyncGradWorker):
             self.scheduler.step()
 
         w_local = self.model.state_dict()
-        delta = {
-            k: (w_local[k] - w_global[k]).detach().cpu().numpy().astype(np.float32)
-            for k in w_global
-        }
+        delta = self.get_delta(w_local, w_global)
 
         if total_samples.item() == 0:
             self._last_train_top5_accuracy = 0.0

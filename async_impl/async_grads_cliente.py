@@ -138,6 +138,13 @@ class AsyncGradWorker(DDPClient):
         elapsed = time.perf_counter() - t0
         return test_loss / test_total, test_correct / test_total, elapsed
 
+    def get_grads(self, n_batches=1):
+        return {
+            name: (param.grad / n_batches).detach().cpu().numpy().astype(np.float32)
+            for name, param in self.model.named_parameters()
+            if param.grad is not None
+        }
+
     def train(self, t0, w_global=None):
         self._ensure_loaders()
         self.model.train()
@@ -182,11 +189,7 @@ class AsyncGradWorker(DDPClient):
                     end="\r",
                 )
 
-        grads = {
-            name: (param.grad / n_batches).detach().cpu().numpy().astype(np.float32)
-            for name, param in self.model.named_parameters()
-            if param.grad is not None
-        }
+        grads = self.get_grads(n_batches)
 
         if total_samples.item() == 0:
             self._last_train_top5_accuracy = 0.0

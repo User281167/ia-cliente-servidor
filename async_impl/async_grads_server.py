@@ -69,6 +69,7 @@ class AsyncGradServer(DDPAsyncServer):
         self.k = 0
         self._k_lock = threading.Lock()
         self._last_test_worker_idx = -1
+        self._stop_event = threading.Event()
 
         self.metrics = pd.DataFrame(
             columns=[
@@ -136,7 +137,7 @@ class AsyncGradServer(DDPAsyncServer):
 
         return correct / total, confusion_matrix.compute().cpu()
 
-    def _get_state_numpy(self) -> dict:
+    def get_weights(self) -> dict:
         return {
             k: v.detach().cpu().numpy().astype(np.float32)
             for k, v in self.model.state_dict().items()
@@ -234,13 +235,16 @@ class AsyncGradServer(DDPAsyncServer):
             wid = msg["worker_id"]
 
             with self._k_lock:
-                state = self._get_state_numpy()
+                state = self.get_weights()
                 k = self.k
 
             self._send_step_to(wid, state, k)
 
         @self.on("result")
         def _handle_result(msg: dict) -> None:
+            if self._stop_event.is_set():
+                return
+
             wid = msg["worker_id"]
             payload = msg["payload"]
             t0 = time.perf_counter()
@@ -264,7 +268,7 @@ class AsyncGradServer(DDPAsyncServer):
                     grad_norm = float("nan")
 
                 self.k += 1
-                fresh_state = self._get_state_numpy()
+                fresh_state = self.get_weights()
                 k_new = self.k
 
                 send_test = k_new % self.test_each == 0
@@ -303,6 +307,9 @@ class AsyncGradServer(DDPAsyncServer):
 
         @self.on("test_result")
         def _handle_test_result(msg: dict) -> None:
+            if self._stop_event.is_set():
+                return
+
             wid = msg["worker_id"]
             payload = msg["payload"]
 
@@ -330,7 +337,7 @@ class AsyncGradServer(DDPAsyncServer):
             with self._k_lock:
                 k_new = self.k + 1
                 self.k = k_new
-                fresh_state = self._get_state_numpy()
+                fresh_state = self.get_weights()
 
             self._send_step_to(wid, fresh_state, k_new)
 
@@ -355,6 +362,7 @@ class AsyncGradServer(DDPAsyncServer):
             time.sleep(1)
 
         log.info(f"Entrenamiento completado - k={self.k} iteraciones totales")
+        self._stop_event.set()
 
     def results(self) -> None:
         save_path = self.save_path
@@ -438,6 +446,7 @@ class AsyncGradServer(DDPAsyncServer):
         except KeyboardInterrupt:
             log.info("Entrenamiento interrumpido por usuario")
         finally:
+            self._stop_event.set()
             self.stop_server()
 
     def stop_server(self) -> None:

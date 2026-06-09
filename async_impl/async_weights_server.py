@@ -113,7 +113,7 @@ class AsyncWeightsServer(AsyncGradServer):
                     delta_norm = float("nan")
 
                 self.k += 1
-                fresh_state = self._get_state_numpy()
+                fresh_state = self.get_weights()
                 k_new = self.k
 
                 send_test = k_new % self.test_each == 0
