@@ -68,7 +68,6 @@ class AsyncGradServer(DDPAsyncServer):
         self._scheduler = ShardScheduler(data_len, shard_size, batch_size)
         self.k = 0
         self._k_lock = threading.Lock()
-        self._last_test_worker_idx = -1
         self._stop_event = threading.Event()
 
         self.metrics = pd.DataFrame(
@@ -335,11 +334,10 @@ class AsyncGradServer(DDPAsyncServer):
             log.info(txt)
 
             with self._k_lock:
-                k_new = self.k + 1
-                self.k = k_new
+                k_now = self.k
                 fresh_state = self.get_weights()
 
-            self._send_step_to(wid, fresh_state, k_new)
+            self._send_step_to(wid, fresh_state, k_now)
 
         @self.on("metrics")
         def _handle_metrics(msg: dict) -> None:
