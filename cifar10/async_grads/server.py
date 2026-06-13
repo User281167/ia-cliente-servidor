@@ -25,6 +25,7 @@ class CIFAR10Server(AsyncGradServer):
         test_each: int = 10,
         min_workers: int = 1,
         save_path: str | None = None,
+        use_lr_decay: bool = False,
     ):
         config = {
             "gray": gray,
@@ -45,6 +46,7 @@ class CIFAR10Server(AsyncGradServer):
             test_each=test_each,
             min_workers=min_workers,
             config=config,
+            use_lr_decay=use_lr_decay,
             save_path=save_path,
         )
 

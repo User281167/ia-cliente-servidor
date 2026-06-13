@@ -18,14 +18,19 @@ from .shard_scheduler import ShardScheduler
 
 class AsyncGradServer(DDPAsyncServer):
     """
-    Servidor ASGD generico.
+    max_staleness = inf
+        No se descarta ningún gradiente.
+        Equivale a Async SGD clásico.
 
-    Algoritmo:
-      worker recibe x^(k-delta), shard
-      worker devuelve gradiente
-      server aplica x^(k+1) = x^k - gamma_k * grad
-      gamma_k = lr / (1 + staleness)
-      server envia pesos frescos + siguiente shard al mismo worker
+    max_staleness = R
+        Se descartan gradientes con δ > R.
+        Equivale a Ringmaster ASGD.
+
+    use_lr_decay = False
+        γ = lr
+
+    use_lr_decay = True
+        γ = lr/(1+δ)
     """
 
     def __init__(
@@ -35,11 +40,12 @@ class AsyncGradServer(DDPAsyncServer):
         lr: float = 0.001,
         shard_size: int = 5000,
         batch_size: int = 128,
-        max_staleness: int = 10,
+        max_staleness: int | None = None,
         test_each: int = 10,
         min_workers: int = 1,
         config: dict | None = None,
         save_path: str | None = None,
+        use_lr_decay: bool = False,
     ):
         if config is None:
             config = {
@@ -60,6 +66,7 @@ class AsyncGradServer(DDPAsyncServer):
         self.test_each = test_each
         self.epochs = epochs
         self.save_path = save_path
+        self.use_lr_decay = use_lr_decay
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.criterion = self.optimizer = self.scheduler = None
@@ -101,7 +108,10 @@ class AsyncGradServer(DDPAsyncServer):
         super()._remove_dead(wids)
 
     def _gamma(self, staleness: int) -> float:
-        return self.lr / (1.0 + staleness)
+        if self.use_lr_decay:
+            return self.lr / (1.0 + staleness)
+
+        return self.lr
 
     def evaluate(self) -> tuple[float, float]:
         self.model.eval()
@@ -255,13 +265,16 @@ class AsyncGradServer(DDPAsyncServer):
             top5_accuracy = payload.get("top5_accuracy", float("nan"))
             iter_sent = payload.get("iter_sent", self.k)
             shard_idx = payload.get("shard_idx", None)
+            accepted = False
 
             with self._k_lock:
                 k_now = self.k
                 staleness = k_now - iter_sent
                 gamma = self._gamma(staleness)
 
-                if staleness <= self.max_staleness:
+                accepted = self.max_staleness is None or staleness < self.max_staleness
+
+                if accepted:
                     grad_norm = self._apply_gradient(grads, gamma)
                 else:
                     grad_norm = float("nan")
@@ -272,7 +285,7 @@ class AsyncGradServer(DDPAsyncServer):
 
                 send_test = k_new % self.test_each == 0
 
-                if staleness <= self.max_staleness:
+                if accepted:
                     self.metrics.loc[len(self.metrics)] = [
                         loss,
                         accuracy,
@@ -291,11 +304,11 @@ class AsyncGradServer(DDPAsyncServer):
             if shard_idx is not None:
                 self._scheduler.complete(wid, shard_idx)
 
-            if k_now % 10 == 0 and staleness <= self.max_staleness:
+            if k_now % 10 == 0 and accepted:
                 txt = (
                     f"[k={k_now}] epoch={self._scheduler.current_epoch}/{self.epochs}"
-                    f" | worker={wid} | staleness={staleness} | gamma={gamma:.6f} "
-                    f" | samples={samples} | loss={loss:.4f} | accuracy={accuracy:.4f} "
+                    f" | worker={wid} | staleness={staleness} | gamma={gamma:.6f}"
+                    f" | samples={samples} | loss={loss:.4f} | accuracy={accuracy:.4f}"
                     f" | grad_norm={grad_norm:.4f}"
                 )
 

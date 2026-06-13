@@ -26,6 +26,7 @@ class CIFAR10Server(AsyncWeightsServer):
         test_each: int = 10,
         min_workers: int = 1,
         save_path: str | None = None,
+        use_lr_decay: bool = False,
     ):
         config = {
             "gray": gray,
@@ -48,6 +49,7 @@ class CIFAR10Server(AsyncWeightsServer):
             min_workers=min_workers,
             config=config,
             save_path=save_path,
+            use_lr_decay=use_lr_decay,
         )
 
         self.gray = gray

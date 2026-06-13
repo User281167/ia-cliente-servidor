@@ -24,11 +24,12 @@ class AsyncWeightsServer(AsyncGradServer):
         gamma: float = 0.1,
         shard_size: int = 5000,
         batch_size: int = 128,
-        max_staleness: int = 10,
+        max_staleness: int | None = None,
         test_each: int = 10,
         min_workers: int = 1,
         config: dict | None = None,
         save_path: str | None = None,
+        use_lr_decay: bool = False,
     ):
         if config is None:
             config = {
@@ -48,6 +49,7 @@ class AsyncWeightsServer(AsyncGradServer):
             min_workers=min_workers,
             config=config,
             save_path=save_path,
+            use_lr_decay=use_lr_decay,
         )
 
         self.gamma = gamma
@@ -64,7 +66,10 @@ class AsyncWeightsServer(AsyncGradServer):
         )
 
     def _gamma(self, staleness: int) -> float:
-        return self.gamma / (1.0 + staleness)
+        if self.use_lr_decay:
+            return self.gamma / (1.0 + staleness)
+
+        return self.gamma
 
     def _apply_delta(self, delta: dict, gamma: float) -> float:
         state = self.model.state_dict()
@@ -101,13 +106,16 @@ class AsyncWeightsServer(AsyncGradServer):
             top5_accuracy = payload.get("top5_accuracy", float("nan"))
             iter_sent = payload.get("iter_sent", self.k)
             shard_idx = payload.get("shard_idx", None)
+            accepted = False
 
             with self._k_lock:
                 k_now = self.k
                 staleness = k_now - iter_sent
                 gamma = self._gamma(staleness)
 
-                if staleness <= self.max_staleness:
+                accepted = self.max_staleness is None or staleness < self.max_staleness
+
+                if accepted:
                     delta_norm = self._apply_delta(delta, gamma)
                 else:
                     delta_norm = float("nan")
@@ -118,7 +126,7 @@ class AsyncWeightsServer(AsyncGradServer):
 
                 send_test = k_new % self.test_each == 0
 
-                if staleness <= self.max_staleness:
+                if accepted:
                     self.metrics.loc[len(self.metrics)] = [
                         loss,
                         accuracy,
@@ -137,7 +145,7 @@ class AsyncWeightsServer(AsyncGradServer):
             if shard_idx is not None:
                 self._scheduler.complete(wid, shard_idx)
 
-            if k_now % 10 == 0 and staleness <= self.max_staleness:
+            if k_now % 10 == 0 and accepted:
                 txt = (
                     f"[k={k_now}]: | epoch={self._scheduler.current_epoch}/{self.epochs} | "
                     f"worker={wid} | staleness={staleness} | gamma={gamma:.6f} | "

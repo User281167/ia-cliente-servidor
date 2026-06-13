@@ -18,6 +18,7 @@ def run_server(
     host: str = "0.0.0.0",
     port: int = 9090,
     save_path: str | None = None,
+    use_lr_decay: bool = False,
 ):
     server = CIFAR10Server(
         gray=gray,
@@ -31,6 +32,7 @@ def run_server(
         test_each=test_each,
         min_workers=min_workers,
         save_path=save_path,
+        use_lr_decay=use_lr_decay,
     )
 
     try:
@@ -61,6 +63,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=9090)
     parser.add_argument("--rgb", action="store_true")
     parser.add_argument("--normalize", action="store_true")
+    parser.add_argument("--use-lr-decay", action="store_true")
     parser.add_argument("--lr", type=float, default=0.001)
 
     parser.add_argument("--conv", action="store_true")
@@ -73,7 +76,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-staleness",
         type=int,
-        default=10,
+        default=None,
         help="Si un worker responde despues de max-staleness, se descarta su gradiente",
     )
     parser.add_argument("--test-each", type=int, default=10)
@@ -103,4 +106,5 @@ if __name__ == "__main__":
             save_path=args.save,
             host=args.host,
             port=args.port,
+            use_lr_decay=args.use_lr_decay,
         )

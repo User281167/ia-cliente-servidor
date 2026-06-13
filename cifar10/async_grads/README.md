@@ -22,6 +22,7 @@ python -m cifar10.async_grads.train --worker --host localhost --save "results"
 
 ### Parámetros para el servidor
 - --lr 
+- --use-lr-decay: Con tasa de decaimiento del learning rate
 - --epochs
 - --test-each: Cantidad de iteraciones para el test
 - --shard-size: Tamaño de los shards de datos (datos a tomar en el worker)
