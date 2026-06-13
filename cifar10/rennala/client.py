@@ -1,6 +1,6 @@
 from pandas.core.resample import Literal
 
-from async_impl import AsyncGradWorker, AsyncWeightsWorker
+from async_sgd.sgd import AsyncGradWorker, AsyncWeightsWorker
 from cifar10.load_data import preload_cifar10_to_ram
 from cifar10.model import cifar10_get_model
 from ddp.pickle_utils import send_msg

@@ -7,13 +7,12 @@ import pandas as pd
 import torch
 from torchmetrics.classification import MulticlassConfusionMatrix
 
+from async_sgd.shard_scheduler import ShardScheduler
 from ddp import DDPAsyncServer
 from ddp.logger import log
 from ddp.message import DDPMessage
 from ddp.pickle_utils import send_msg
 from utils import plot_grid, time_wrapper
-
-from .shard_scheduler import ShardScheduler
 
 
 class AsyncGradServer(DDPAsyncServer):

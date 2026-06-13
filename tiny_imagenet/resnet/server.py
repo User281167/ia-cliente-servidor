@@ -3,7 +3,7 @@ import os
 import torch
 from torch.utils.data import DataLoader
 
-from async_impl import AsyncWeightsServer
+from async_sgd.sgd import AsyncWeightsServer
 from tiny_imagenet.load_data import TinyImageNetLazy
 from tiny_imagenet.resnet.model import (
     get_tiny_imagenet_resnet,

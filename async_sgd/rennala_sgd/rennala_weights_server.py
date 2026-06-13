@@ -5,7 +5,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from async_impl import AsyncWeightsServer
+from async_sgd.sgd import AsyncWeightsServer
 from ddp.logger import log
 
 
@@ -107,8 +107,8 @@ class RennalaWeightsServer(AsyncWeightsServer):
             if staleness == 0:
                 txt = (
                     f"[k={k_now}] epoch={self._scheduler.current_epoch}/{self.epochs}"
-                    f" | worker={wid} "
-                    f" | samples={samples} | loss={loss:.4f} | accuracy={accuracy:.4f} "
+                    f" | worker={wid}"
+                    f" | samples={samples} | loss={loss:.4f} | accuracy={accuracy:.4f}"
                     f" | delta_norm={delta_norm:.4f}"
                 )
 

@@ -1,4 +1,4 @@
-from async_impl import AsyncGradWorker
+from async_sgd.sgd import AsyncGradWorker
 from cifar10.load_data import preload_cifar10_to_ram
 from cifar10.model import cifar10_get_model
 from ddp.pickle_utils import log, send_msg

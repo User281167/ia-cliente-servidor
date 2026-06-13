@@ -2,7 +2,7 @@ import os
 
 import torch
 
-from async_impl import AsyncWeightsServer
+from async_sgd.sgd import AsyncWeightsServer
 from cifar10.load_data import cifar10_classes, cifar10_data_len, get_cifar10_dataloader
 from utils import plot_confusion_matrix
 

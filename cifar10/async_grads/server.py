@@ -1,6 +1,6 @@
 import os
 
-from async_impl import AsyncGradServer
+from async_sgd.sgd import AsyncGradServer
 from cifar10.load_data import cifar10_classes, cifar10_data_len, get_cifar10_dataloader
 from cifar10.model import cifar10_get_model
 from utils import plot_confusion_matrix

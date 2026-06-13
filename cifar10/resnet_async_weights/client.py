@@ -1,4 +1,4 @@
-from async_impl import AsyncWeightsWorker
+from async_sgd.sgd import AsyncWeightsWorker
 from cifar10.load_data import cifar10_classes, preload_cifar10_to_ram
 from ddp.pickle_utils import log, send_msg
 

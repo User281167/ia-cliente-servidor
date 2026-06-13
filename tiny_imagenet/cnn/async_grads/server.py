@@ -1,6 +1,6 @@
 import os
 
-from async_impl import AsyncGradServer
+from async_sgd.sgd import AsyncGradServer
 from tiny_imagenet.utils.report import (
     compute_confusion_matrix_and_accuracy,
     excel_report,

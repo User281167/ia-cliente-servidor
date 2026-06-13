@@ -1,4 +1,4 @@
-from async_impl import AsyncWeightsWorker
+from async_sgd.sgd import AsyncWeightsWorker
 from ddp.pickle_utils import log, send_msg
 from tiny_imagenet.load_data import TinyImageNetLazy
 from tiny_imagenet.resnet.model import (

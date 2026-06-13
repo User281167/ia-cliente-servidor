@@ -2,7 +2,7 @@ import os
 
 from torch.utils.data import DataLoader
 
-from async_impl import AsyncGradServer
+from async_sgd.sgd import AsyncGradServer
 from tiny_imagenet.load_data import TinyImageNetLazy
 from tiny_imagenet.mobilenet.model import (
     get_tiny_imagenet_mobilenet,

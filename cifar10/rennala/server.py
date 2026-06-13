@@ -1,9 +1,9 @@
 import os
 from typing import Literal
 
+from async_sgd import RennalaSGDServer, RennalaWeightsServer
 from cifar10.load_data import cifar10_classes, cifar10_data_len, get_cifar10_dataloader
 from cifar10.model import cifar10_get_model
-from rennala_sgd import RennalaSGDServer, RennalaWeightsServer
 from utils import plot_confusion_matrix
 
 
@@ -16,7 +16,7 @@ class CIFAR10ServerBase:
         conv=False,
         epochs=20,
         lr=0.001,
-        gamma=0.1,
+        gamma=None,
         shard_size=5000,
         batch_size=128,
         test_each=10,
@@ -32,19 +32,33 @@ class CIFAR10ServerBase:
             "batch_size": batch_size,
         }
 
-        super().__init__(
-            data_len=cifar10_data_len(),
-            B=B,
-            epochs=epochs,
-            lr=lr,
-            gamma=gamma,
-            shard_size=shard_size,
-            batch_size=batch_size,
-            test_each=test_each,
-            min_workers=min_workers,
-            config=config,
-            save_path=save_path,
-        )
+        if gamma:
+            super().__init__(
+                data_len=cifar10_data_len(),
+                B=B,
+                epochs=epochs,
+                lr=lr,
+                gamma=gamma,
+                shard_size=shard_size,
+                batch_size=batch_size,
+                test_each=test_each,
+                min_workers=min_workers,
+                config=config,
+                save_path=save_path,
+            )
+        else:
+            super().__init__(
+                data_len=cifar10_data_len(),
+                B=B,
+                epochs=epochs,
+                lr=lr,
+                shard_size=shard_size,
+                batch_size=batch_size,
+                test_each=test_each,
+                min_workers=min_workers,
+                config=config,
+                save_path=save_path,
+            )
 
         self.gray = gray
         self.normalize = normalize

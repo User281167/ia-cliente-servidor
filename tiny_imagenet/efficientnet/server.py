@@ -2,7 +2,7 @@ import os
 
 from torch.utils.data import DataLoader
 
-from async_impl import AsyncGradServer
+from async_sgd.sgd import AsyncGradServer
 from tiny_imagenet.efficientnet.model import (
     efficientnet_transform,
     get_tiny_imagenet_efficientnet,

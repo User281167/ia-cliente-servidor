@@ -5,7 +5,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from async_impl import AsyncGradServer
+from async_sgd.sgd import AsyncGradServer
 from ddp.logger import log
 
 

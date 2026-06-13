@@ -6,11 +6,10 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
+from async_sgd.shard import AsyncShardSampler, IndexedDataset
+from async_sgd.shard_scheduler import ShardAssignment
 from ddp import DDPClient
 from ddp.pickle_utils import log, send_msg
-
-from .shard import AsyncShardSampler, IndexedDataset
-from .shard_scheduler import ShardAssignment
 
 
 class AsyncGradWorker(DDPClient):
